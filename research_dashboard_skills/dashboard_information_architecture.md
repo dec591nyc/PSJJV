@@ -4,17 +4,17 @@
 
 1. `總覽儀表板`
 2. `輿論情報`
-3. `交叉觀測`
+3. `輿情真相`
 4. `裁判資料庫`
 
-`交叉觀測` replaces `驗證報告`. It is more neutral and accurately describes comparison between court data, public discussion, and manually reviewed facts.
+`輿情真相` compares court data, public discussion, and manually reviewed facts while keeping source status visible.
 
 ## Chart Allocation
 
 ### Overview
 
 - KPI cards: total judgments and selected topic counts.
-- Line chart: daily/monthly volume trend. A time axis is required, so a line chart is the primary form.
+- Line chart: monthly judgment volume trend. A time axis is required, so a line chart is the primary form.
 - Donut chart: category composition. It is limited to seven stable categories and includes a numeric legend.
 - Horizontal bars: court ranking. Bars support precise comparison better than a pie chart.
 - Table: case-title ranking. Text-heavy labels need a table, not chart labels.
@@ -27,7 +27,7 @@
 - Summary list: monthly topic summaries with source links and crawl status.
 - Empty states must never fabricate discussion counts.
 
-### Cross Observation
+### Public Opinion Truth
 
 - KPI cards: source coverage, linked judgment rate, reviewed sample count, and signal status.
 - Comparison table: court volume versus discussion volume versus review status.

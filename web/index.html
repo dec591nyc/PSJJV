@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="台灣公共安全、裁判資料與輿論訊號的本機分析平台" />
-  <title>公共安全與司法洞察平台</title>
+  <meta name="description" content="台灣公共安全官方統計與輿論數據對照平台" />
+  <title>公共安全統計與輿情分析平台</title>
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="/styles.css" />
 </head>
@@ -17,14 +17,14 @@
         <span class="brand-mark" aria-hidden="true">法</span>
         <div>
           <p class="eyebrow">PUBLIC SAFETY INTEGRITY ANALYTICS</p>
-          <h1>公共安全與司法洞察平台</h1>
+          <h1>公共安全統計與輿情分析平台</h1>
         </div>
       </div>
-      <p class="subtitle">裁判索引、輿論訊號與人工複核分層呈現；所有摘要保留方法與證據狀態。</p>
+      <p class="subtitle">以官方統計觀察犯罪類別與地區分布，並逐步加入輿論聲量的數據對照。</p>
     </div>
     <div class="status-group" aria-label="系統狀態">
       <span class="status-dot" aria-hidden="true"></span>
-      <span>本機唯讀模式</span>
+      <span>官方資料檢視</span>
       <span class="status-divider" aria-hidden="true"></span>
       <span id="header-record-count">資料載入中</span>
     </div>
@@ -32,45 +32,36 @@
 
   <section class="query-shell" aria-labelledby="query-title">
     <div class="query-heading">
-      <span id="query-title">跨資料查詢</span>
-      <small>原告、被告目前為索引片段初篩</small>
+      <span id="query-title">資料控制列</span>
+      <small>月份套用至官方統計與輿情；關鍵字查詢會前往裁判來源索引</small>
     </div>
     <form id="global-query" class="query-grid">
       <label>資料月份
         <select id="month" name="month" aria-label="資料月份"></select>
       </label>
-      <label>案由
-        <input id="query-title-input" name="title" placeholder="例如：詐欺等" autocomplete="off" />
+      <label>全文索引
+        <input id="query-search" name="q" placeholder="搜尋案由、法院、原告、被告、JID 或關鍵字" autocomplete="off" />
       </label>
-      <label>法院／庭別
-        <input id="query-court" name="court" placeholder="例如：臺灣高等法院" autocomplete="off" />
-      </label>
-      <label>原告
-        <input id="query-plaintiff" name="plaintiff" placeholder="姓名或名稱" autocomplete="off" />
-      </label>
-      <label>被告
-        <input id="query-defendant" name="defendant" placeholder="姓名或名稱" autocomplete="off" />
-      </label>
-      <button class="primary-action" type="submit">查詢裁判</button>
+      <button class="primary-action" type="submit">查詢來源</button>
     </form>
   </section>
 
   <nav class="tabs" aria-label="主要頁面">
-    <button class="tab is-active" type="button" data-route="overview" aria-current="page">總覽儀表板</button>
+    <button class="tab is-active" type="button" data-route="overview" aria-current="page">官方統計</button>
     <button class="tab" type="button" data-route="opinion">輿論情報</button>
-    <button class="tab" type="button" data-route="cross-observation">交叉觀測</button>
-    <button class="tab" type="button" data-route="database">裁判資料庫</button>
+    <button class="tab" type="button" data-route="truth">數據對照</button>
+    <button class="tab" type="button" data-route="database">裁判來源</button>
   </nav>
 
   <main id="main-content">
     <section id="page-overview" class="page is-active" data-page="overview">
       <div class="page-heading">
         <div>
-          <p class="section-kicker">JUDICIAL DATA OVERVIEW</p>
-          <h2>裁判資料總覽</h2>
-          <p>先看量體與分布，再進入逐案審閱。候選分類不等同最終法律定性。</p>
+          <p class="section-kicker">OFFICIAL PUBLIC SAFETY STATISTICS</p>
+          <h2>受（處）理刑事案件統計</h2>
+          <p>呈現內政部資料集 9603 的單月案件量、類別與地區分布；數字不代表起訴或裁判件數。</p>
         </div>
-        <span class="method-badge">資料：司法院裁判索引</span>
+        <a id="official-source-link" class="method-badge" href="#" target="_blank" rel="noreferrer">查看官方 CSV</a>
       </div>
 
       <section class="summary-strip" aria-labelledby="overview-summary-title">
@@ -78,7 +69,7 @@
           <span class="summary-label" id="overview-summary-title">系統摘要</span>
           <p id="overview-summary">正在整理本月資料。</p>
         </div>
-        <span class="confidence-badge">描述性統計 · 需人工複核</span>
+        <span class="confidence-badge">官方資料 · 描述性統計</span>
       </section>
 
       <section class="metrics" id="metrics" aria-label="核心指標"></section>
@@ -87,30 +78,27 @@
         <article class="panel panel-wide">
           <div class="panel-head">
             <div>
-              <h3>每日裁判量</h3>
-              <p>觀察月份內的量體變化；點位可顯示當日筆數。</p>
+              <h3>每月刑事案件量</h3>
+              <p>目前僅比較已自主下載並通過加總驗證的月份。</p>
             </div>
             <span class="chart-type">曲線圖</span>
           </div>
-          <div id="daily-trend" class="line-chart" role="img" aria-label="每日裁判量曲線圖"></div>
+          <div id="monthly-trend" class="line-chart" role="img" aria-label="每月刑事案件量曲線圖"></div>
           <details class="data-fallback">
             <summary>查看數值表</summary>
-            <div id="daily-table"></div>
+            <div id="monthly-table"></div>
           </details>
         </article>
 
         <article class="panel">
           <div class="panel-head">
             <div>
-              <h3>議題候選分布</h3>
-              <p>同一裁判可能同時符合多個關鍵字分類。</p>
+              <h3>關注類別件數</h3>
+              <p>使用官方 CSV 的原始欄位名稱，不進行案件文字推測。</p>
             </div>
-            <span class="chart-type">圓環圖</span>
+            <span class="chart-type">長條圖</span>
           </div>
-          <div class="donut-layout">
-            <div id="category-donut" class="donut-chart" role="img" aria-label="議題候選量圓環圖"></div>
-            <div id="category-legend" class="chart-legend"></div>
-          </div>
+          <div id="category-bars" class="bars" role="img" aria-label="關注類別件數長條圖"></div>
         </article>
       </section>
 
@@ -118,25 +106,25 @@
         <article class="panel">
           <div class="panel-head">
             <div>
-              <h3>法院／庭別排行</h3>
-              <p>以水平長條比較前十名量體。</p>
+              <h3>詐欺背信地區分布</h3>
+              <p>排除全國總計與署所屬機關，顯示前十個縣市。</p>
             </div>
             <span class="chart-type">長條圖</span>
           </div>
-          <div id="court-list" class="bars"></div>
+          <div id="region-list" class="bars"></div>
         </article>
         <article class="panel">
           <div class="panel-head">
             <div>
-              <h3>主要案由</h3>
-              <p>文字較長，使用表格保留完整可讀性。</p>
+              <h3>資料品質</h3>
+              <p>顯示去重、欄位加總與格式檢查結果。</p>
             </div>
             <span class="chart-type">表格</span>
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>排名</th><th>案由</th><th class="numeric">件數</th></tr></thead>
-              <tbody id="title-table"></tbody>
+              <thead><tr><th>檢查項目</th><th class="numeric">結果</th><th>狀態</th></tr></thead>
+              <tbody id="quality-table"></tbody>
             </table>
           </div>
         </article>
@@ -222,30 +210,30 @@
       </section>
     </section>
 
-    <section id="page-cross-observation" class="page" data-page="cross-observation">
+    <section id="page-truth" class="page" data-page="truth">
       <div class="page-heading">
         <div>
-          <p class="section-kicker">CROSS-SOURCE OBSERVATION</p>
-          <h2>交叉觀測</h2>
-          <p>比較裁判資料量、公共討論與人工複核進度，只呈現訊號，不直接判定公正與否。</p>
+          <p class="section-kicker">OFFICIAL AND PUBLIC OPINION COMPARISON</p>
+          <h2>數據對照</h2>
+          <p>比較同月份、同類別的官方案件量與輿論聲量；資料不足時不產生推估值。</p>
         </div>
         <span class="method-badge">中性研判模式</span>
       </div>
 
-      <section class="metrics compact" id="cross-metrics" aria-label="交叉觀測指標"></section>
+      <section class="metrics compact" id="cross-metrics" aria-label="官方與輿論對照指標"></section>
 
       <section class="dashboard-grid cross-grid">
         <article class="panel panel-wide">
           <div class="panel-head">
             <div>
-              <h3>議題對照矩陣</h3>
-              <p>司法資料是真實索引量；輿論與人工複核欄位尚未接入時明確標示。</p>
+              <h3>類別對照矩陣</h3>
+              <p>官方案件量已接入；輿論聲量尚未接入時明確顯示不可比較。</p>
             </div>
             <span class="chart-type">對照表</span>
           </div>
           <div class="table-wrap">
             <table class="comparison-table">
-              <thead><tr><th>議題</th><th class="numeric">裁判候選</th><th>輿論訊號</th><th>人工複核</th><th>下一步</th></tr></thead>
+              <thead><tr><th>類別</th><th class="numeric">官方案件</th><th class="numeric">輿論聲量</th><th>可比狀態</th><th>說明</th></tr></thead>
               <tbody id="cross-table"></tbody>
             </table>
           </div>
@@ -253,15 +241,12 @@
         <article class="panel">
           <div class="panel-head">
             <div>
-              <h3>系統研判摘要</h3>
-              <p>以已接入資料描述差距，不做公平性定論。</p>
+              <h3>目前資料狀態</h3>
+              <p>只描述已接入的數字，不把缺少的輿論資料補成估計值。</p>
             </div>
           </div>
           <div id="cross-summary" class="analysis-note"></div>
-          <div class="method-note">
-            <strong>摘要策略</strong>
-            <p>目前採規則式可追溯摘要；Ollama 可作本機選配，OpenAI API 留待正式上線。</p>
-          </div>
+          <div class="method-note"><strong>比較條件</strong><p>月份、類別與統計口徑一致後才計算差距。</p></div>
         </article>
       </section>
     </section>

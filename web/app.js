@@ -43,10 +43,14 @@ function safeUrl(value) {
 function formatMonth(value) {
   return /^\d{6}$/.test(value) ? `${value.slice(0, 4)} 年 ${Number(value.slice(4))} 月` : value;
 }
-function formatDateLabel(value) {
-  if (/^\d{8}$/.test(value)) return `${value.slice(4, 6)}/${value.slice(6, 8)}`;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value.slice(5).replace('-', '/');
+function formatMonthLabel(value) {
+  if (/^\d{6}$/.test(value)) return `${value.slice(0, 4)}/${value.slice(4, 6)}`;
   return value;
+}
+function formatChange(value) {
+  if (value === null || value === undefined) return '無前月基準';
+  const sign = value > 0 ? '+' : '';
+  return `較前月 ${sign}${value}%`;
 }
 function showToast(message) {
   const toast = el('toast');
@@ -80,7 +84,7 @@ function switchRoute(route) {
   });
   history.replaceState(null, '', `#${route}`);
   if (route === 'opinion') loadOpinion().catch(handleError);
-  if (route === 'cross-observation') renderCrossObservation();
+  if (route === 'truth') renderCrossObservation();
   if (route === 'database') loadCases().catch(handleError);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -89,11 +93,15 @@ function categoryCount(category) {
   return state.summary?.category_counts?.find(item => item.category === category)?.count || 0;
 }
 
+function categoryItem(category) {
+  return state.summary?.category_counts?.find(item => item.category === category) || {};
+}
+
 async function loadMonths() {
   const data = await getJson('/api/months');
   const items = data.items?.length ? data.items : [{ source_month: '202604', count: 0 }];
   const options = items.map(item =>
-    `<option value="${escapeHtml(item.source_month)}">${escapeHtml(formatMonth(item.source_month))} · ${fmt.format(item.count)} 筆</option>`
+    `<option value="${escapeHtml(item.source_month)}">${escapeHtml(formatMonth(item.source_month))} · ${fmt.format(item.count)} 件</option>`
   ).join('');
   el('month').innerHTML = options;
   el('opinion-month').innerHTML = options;
@@ -101,10 +109,10 @@ async function loadMonths() {
 
 function renderMetrics() {
   const items = [
-    ['裁判總量', state.summary.total_judgments, formatMonth(state.summary.source_month), 'neutral'],
-    ['詐欺候選', categoryCount('fraud'), '全文關鍵字候選', 'blue'],
-    ['傷害／重傷候選', categoryCount('injury'), '不與交通傷害重複加總', 'amber'],
-    ['廉政訊號', categoryCount('public_integrity') + categoryCount('election_law'), '需逐案人工複核', 'red']
+    ['刑事案件總量', state.summary.total_cases, formatChange(state.summary.total_change_pct), 'neutral'],
+    ['詐欺背信', categoryCount('fraud'), formatChange(categoryItem('fraud').change_pct), 'blue'],
+    ['傷害', categoryCount('injury'), formatChange(categoryItem('injury').change_pct), 'amber'],
+    ['妨害性自主罪', categoryCount('sexual_offense'), formatChange(categoryItem('sexual_offense').change_pct), 'red']
   ];
   el('metrics').innerHTML = items.map(([label, value, note, tone]) => `
     <article class="metric metric-${tone}">
@@ -115,16 +123,18 @@ function renderMetrics() {
 }
 
 function renderLineChart(rows) {
-  const container = el('daily-trend');
+  const container = el('monthly-trend');
   if (!rows.length) {
-    container.innerHTML = '<div class="chart-empty"><strong>沒有趨勢資料</strong><p>所選月份沒有可用日期。</p></div>';
+    container.innerHTML = '<div class="chart-empty"><strong>沒有月份資料</strong><p>下載並驗證官方統計後才會顯示每月趨勢。</p></div>';
     return;
   }
   const width = 900;
   const height = 280;
   const pad = { top: 18, right: 24, bottom: 36, left: 58 };
   const max = Math.max(...rows.map(row => row.count), 1);
-  const x = index => pad.left + (index * (width - pad.left - pad.right)) / Math.max(rows.length - 1, 1);
+  const x = index => rows.length === 1
+    ? (pad.left + width - pad.right) / 2
+    : pad.left + (index * (width - pad.left - pad.right)) / (rows.length - 1);
   const y = value => height - pad.bottom - (value / max) * (height - pad.top - pad.bottom);
   const points = rows.map((row, index) => `${x(index)},${y(row.count)}`).join(' ');
   const yTicks = [0, 0.25, 0.5, 0.75, 1];
@@ -135,67 +145,65 @@ function renderLineChart(rows) {
   }).join('');
   const labelStep = Math.max(Math.ceil(rows.length / 6), 1);
   const xLabels = rows.map((row, index) => index % labelStep === 0 || index === rows.length - 1
-    ? `<text x="${x(index)}" y="${height - 10}" text-anchor="middle">${escapeHtml(formatDateLabel(row.date))}</text>` : '').join('');
+    ? `<text x="${x(index)}" y="${height - 10}" text-anchor="middle">${escapeHtml(formatMonthLabel(row.month))}</text>` : '').join('');
   const dots = rows.map((row, index) => `<circle cx="${x(index)}" cy="${y(row.count)}" r="4" tabindex="0">
-    <title>${escapeHtml(row.date)}：${fmt.format(row.count)} 筆</title></circle>`).join('');
+    <title>${escapeHtml(formatMonth(row.month))}：${fmt.format(row.count)} 件</title></circle>`).join('');
   container.innerHTML = `<svg viewBox="0 0 ${width} ${height}" aria-hidden="true" preserveAspectRatio="none">
     ${grids}${xLabels}
     <polyline points="${points}" class="trend-line" />
     ${dots}
   </svg>`;
-  el('daily-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>日期</th><th class="numeric">件數</th></tr></thead><tbody>${rows.map(row =>
-    `<tr><td>${escapeHtml(row.date)}</td><td class="numeric">${fmt.format(row.count)}</td></tr>`).join('')}</tbody></table></div>`;
+  el('monthly-table').innerHTML = `<div class="table-wrap"><table><thead><tr><th>月份</th><th class="numeric">件數</th></tr></thead><tbody>${rows.map(row =>
+    `<tr><td>${escapeHtml(formatMonth(row.month))}</td><td class="numeric">${fmt.format(row.count)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 
-function renderDonut(rows) {
-  const total = rows.reduce((sum, row) => sum + row.count, 0) || 1;
-  const radius = 72;
-  const circumference = 2 * Math.PI * radius;
-  let offset = 0;
-  const circles = rows.map((row, index) => {
-    const length = (row.count / total) * circumference;
-    const circle = `<circle cx="100" cy="100" r="${radius}" fill="none" stroke="${chartColors[index % chartColors.length]}" stroke-width="28" stroke-dasharray="${length} ${circumference - length}" stroke-dashoffset="${-offset}" />`;
-    offset += length;
-    return circle;
-  }).join('');
-  el('category-donut').innerHTML = `<svg viewBox="0 0 200 200" aria-hidden="true">
-    <circle cx="100" cy="100" r="${radius}" fill="none" stroke="#e2e8f0" stroke-width="28" />
-    <g transform="rotate(-90 100 100)">${circles}</g>
-    <text x="100" y="94" text-anchor="middle" class="donut-value">${fmt.format(total)}</text>
-    <text x="100" y="118" text-anchor="middle" class="donut-label">候選標記</text>
-  </svg>`;
-  el('category-legend').innerHTML = rows.map((row, index) => `
-    <div class="legend-row">
-      <span class="legend-swatch" style="background:${chartColors[index % chartColors.length]}"></span>
-      <span title="${escapeHtml(row.label)}">${escapeHtml(categoryShortLabels[row.category] || row.label)}</span>
-      <strong>${fmt.format(row.count)}</strong>
+function renderCategoryBars(rows) {
+  const max = Math.max(...rows.map(row => row.count), 1);
+  el('category-bars').innerHTML = rows.map((row, index) => `
+    <div class="bar-row">
+      <div class="bar-label">
+        <span title="${escapeHtml(row.label)}">${escapeHtml(row.label)}</span>
+        <strong>${fmt.format(row.count)}</strong>
+      </div>
+      <div class="bar-track" aria-hidden="true"><div class="bar-fill" style="width:${Math.max((row.count / max) * 100, 1)}%;background:${chartColors[index % chartColors.length]}"></div></div>
+      <small>${escapeHtml(formatChange(row.change_pct))}</small>
     </div>`).join('');
 }
 
-function renderCourtBars(rows) {
+function renderRegionBars(rows) {
   const max = Math.max(...rows.map(row => row.count), 1);
-  el('court-list').innerHTML = rows.map(row => `
+  el('region-list').innerHTML = rows.slice(0, 10).map(row => `
     <div class="bar-row">
-      <div class="bar-label"><span title="${escapeHtml(row.court_folder)}">${escapeHtml(row.court_folder)}</span><strong>${fmt.format(row.count)}</strong></div>
+      <div class="bar-label"><span>${escapeHtml(row.geography)}</span><strong>${fmt.format(row.count)}</strong></div>
       <div class="bar-track" aria-hidden="true"><div class="bar-fill" style="width:${Math.max((row.count / max) * 100, 1)}%"></div></div>
     </div>`).join('');
 }
 
-function renderTitleTable(rows) {
-  el('title-table').innerHTML = rows.map((row, index) => `<tr>
-    <td class="rank-cell">${index + 1}</td><td>${escapeHtml(row.jtitle || '未標示案由')}</td><td class="numeric">${fmt.format(row.count)}</td>
+function renderQualityTable(quality) {
+  const checks = [
+    ['有效資料列', `${fmt.format(quality.selected_rows)} / 原始 ${fmt.format(quality.raw_rows)}`, quality.selected_rows > 0],
+    ['排除重複區間列', fmt.format(quality.duplicate_rows_dropped), quality.duplicate_rows_dropped >= 0],
+    ['分項吻合全國總計', `${fmt.format(quality.matched_metric_totals)} / ${fmt.format(quality.metric_count)}`, quality.matched_metric_totals === quality.metric_count],
+    ['非法儲存格', fmt.format(quality.invalid_cells), quality.invalid_cells === 0],
+    ['來源「-」轉換為 0', fmt.format(quality.dash_zero_cells), true]
+  ];
+  el('quality-table').innerHTML = checks.map(([label, value, passed]) => `<tr>
+    <td>${escapeHtml(label)}</td><td class="numeric">${escapeHtml(value)}</td>
+    <td><span class="state-chip ${passed ? 'state-ready' : 'state-pending'}">${passed ? '通過' : '待檢查'}</span></td>
   </tr>`).join('');
 }
 
 async function loadSummary() {
-  state.summary = await getJson(`/api/summary?month=${encodeURIComponent(currentMonth())}`);
-  el('header-record-count').textContent = `${formatMonth(state.summary.source_month)} · ${fmt.format(state.summary.total_judgments)} 筆`;
+  state.summary = await getJson(`/api/official-summary?month=${encodeURIComponent(currentMonth())}`);
+  el('header-record-count').textContent = `${formatMonth(state.summary.source_month)} · ${fmt.format(state.summary.total_cases)} 件`;
   el('overview-summary').textContent = state.summary.summary.text;
+  const sourceLink = el('official-source-link');
+  sourceLink.href = safeUrl(state.summary.source_url) || '#';
   renderMetrics();
-  renderLineChart(state.summary.daily_counts || []);
-  renderDonut(state.summary.category_counts || []);
-  renderCourtBars(state.summary.top_courts || []);
-  renderTitleTable(state.summary.top_titles || []);
+  renderLineChart(state.summary.monthly_counts || []);
+  renderCategoryBars(state.summary.category_counts || []);
+  renderRegionBars(state.summary.region_counts || []);
+  renderQualityTable(state.summary.quality || {});
   renderCrossObservation();
 }
 
@@ -207,7 +215,7 @@ async function loadOpinion() {
   el('opinion-status-badge').classList.toggle('is-pending', !ready);
   el('opinion-metrics').innerHTML = [
     ['本月文章', 0, '尚未收集'], ['已接來源', 0, `共 ${state.opinion.sources.length} 個規劃來源`],
-    ['已連結裁判', 0, '等待 JID 比對'], ['摘要完成', 0, '等待資料輸入']
+    ['已分類文章', 0, '等待類別標記'], ['可比月份', 0, '等待輿論資料']
   ].map(([label, value, note]) => `<article class="metric"><span>${label}</span><strong>${fmt.format(value)}</strong><small>${escapeHtml(note)}</small></article>`).join('');
   el('opinion-trend').innerHTML = `<strong>尚無可繪製的討論資料</strong><p>${escapeHtml(state.opinion.message)}</p>`;
   el('opinion-sources').innerHTML = state.opinion.sources.map(source => `<article class="source-card">
@@ -221,29 +229,28 @@ function renderCrossObservation() {
   if (!state.summary) return;
   const opinionReady = state.opinion?.status === 'ready';
   el('cross-metrics').innerHTML = [
-    ['裁判索引', state.summary.total_judgments, '已接入'],
+    ['官方案件統計', state.summary.total_cases, '已接入'],
     ['輿論文章', 0, opinionReady ? '已接入' : '尚未接入'],
-    ['已抽取事實', 0, '等待第二張表'],
-    ['人工複核', 0, '流程待建立']
+    ['可比月份', 0, '等待同月份輿論資料'],
+    ['官方來源', 1, `資料集 ${state.summary.dataset_id}`]
   ].map(([label, value, note]) => `<article class="metric"><span>${label}</span><strong>${fmt.format(value)}</strong><small>${escapeHtml(note)}</small></article>`).join('');
 
   const topics = [
-    ['fraud', '先抽取金額、被害人數與帳戶角色'],
-    ['traffic_injury', '比較判賠金額與過失比例'],
-    ['sexual_offense', '先去識別化，再進行逐案審閱'],
-    ['public_integrity', '比對公職身分與裁判證據鏈'],
-    ['election_law', '樣本少，採逐案人工複核']
+    ['fraud', '等待同月份詐欺相關討論量'],
+    ['injury', '等待同月份傷害相關討論量'],
+    ['sexual_offense', '等待同月份妨害性自主討論量'],
+    ['public_integrity', '等待同月份廉政議題討論量'],
+    ['election_law', '案件量低，需同時顯示絕對數']
   ];
   el('cross-table').innerHTML = topics.map(([key, action]) => `<tr>
     <td><strong>${escapeHtml(categoryLabels[key])}</strong></td>
     <td class="numeric">${fmt.format(categoryCount(key))}</td>
-    <td><span class="state-chip state-pending">待接入</span></td>
-    <td><span class="state-chip state-pending">未開始</span></td>
+    <td class="numeric">—</td>
+    <td><span class="state-chip state-pending">不可比較</span></td>
     <td>${escapeHtml(action)}</td>
   </tr>`).join('');
-  el('cross-summary').innerHTML = `<strong>目前只能確認裁判候選量，不能判斷輿論是否與判決結果一致。</strong>
-    <p>${escapeHtml(state.summary.summary.text)}</p>
-    <p>需完成當事人、主文、法條、金額與結果抽取，再接入每月輿論資料，才能形成可審閱的交叉訊號。</p>`;
+  el('cross-summary').innerHTML = `<strong>目前只有官方案件統計，尚不能計算輿論關注差距。</strong>
+    <p>${escapeHtml(state.summary.summary.text)}</p>`;
 }
 
 function activeCaseParams() {
@@ -251,11 +258,7 @@ function activeCaseParams() {
   const fields = {
     category: el('category-filter').value,
     domain: el('domain-filter').value,
-    q: el('search').value.trim(),
-    title: el('query-title-input').value.trim(),
-    court: el('query-court').value.trim(),
-    plaintiff: el('query-plaintiff').value.trim(),
-    defendant: el('query-defendant').value.trim()
+    q: el('search').value.trim() || el('query-search').value.trim()
   };
   Object.entries(fields).forEach(([key, value]) => value && params.set(key, value));
   return params;
@@ -313,7 +316,7 @@ async function loadCases() {
 }
 
 function clearFilters() {
-  ['query-title-input', 'query-court', 'query-plaintiff', 'query-defendant', 'search'].forEach(id => { el(id).value = ''; });
+  ['query-search', 'search'].forEach(id => { el(id).value = ''; });
   el('category-filter').value = '';
   el('domain-filter').value = '';
   state.offset = 0;
@@ -336,6 +339,7 @@ function bindEvents() {
   document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => switchRoute(tab.dataset.route)));
   el('global-query').addEventListener('submit', event => {
     event.preventDefault();
+    el('search').value = el('query-search').value.trim();
     state.offset = 0;
     switchRoute('database');
   });
@@ -346,7 +350,10 @@ function bindEvents() {
   });
   el('opinion-filters').addEventListener('submit', event => { event.preventDefault(); loadOpinion().catch(handleError); });
   ['category-filter', 'domain-filter'].forEach(id => el(id).addEventListener('change', scheduleCaseLoad));
-  el('search').addEventListener('input', scheduleCaseLoad);
+  el('search').addEventListener('input', () => {
+    el('query-search').value = el('search').value;
+    scheduleCaseLoad();
+  });
   el('clear-filters').addEventListener('click', clearFilters);
   el('previous-page').addEventListener('click', () => { state.offset = Math.max(0, state.offset - state.pageSize); loadCases().catch(handleError); });
   el('next-page').addEventListener('click', () => { state.offset += state.pageSize; loadCases().catch(handleError); });
@@ -357,8 +364,9 @@ async function init() {
   bindEvents();
   await loadSummary();
   await loadOpinion();
-  const route = location.hash.replace('#', '') || 'overview';
-  switchRoute(['overview', 'opinion', 'cross-observation', 'database'].includes(route) ? route : 'overview');
+  const rawRoute = location.hash.replace('#', '') || 'overview';
+  const route = rawRoute === 'cross-observation' ? 'truth' : rawRoute;
+  switchRoute(['overview', 'opinion', 'truth', 'database'].includes(route) ? route : 'overview');
 }
 
 init().catch(handleError);

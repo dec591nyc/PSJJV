@@ -1,5 +1,30 @@
 ﻿# Website Architecture and Roadmap
 
+## Revised Product Direction - 2026-06-20
+
+The website is a numerical statistics and public-opinion comparison dashboard.
+It is not intended to reproduce or warehouse judgment documents.
+
+Primary views:
+
+1. Official statistics: monthly offense-category volume, trend, distribution,
+   geography, and source coverage.
+2. Public opinion metrics: monthly discussion volume, topic share, source
+   distribution, attention trend, and classification confidence.
+3. Official-versus-opinion comparison: attention gaps and trend divergence,
+   clearly labeled as comparison signals rather than truth findings.
+4. Source references: compact tables of selected examples with a
+   `查看司法機關原文` or `查看來源` button to the authoritative external page.
+
+Retention policy:
+
+- Persist normalized counts, category labels, dates, source URLs, hashes,
+  collection runs, and quality indicators.
+- Avoid storing PDFs, full judgment text, and long forum/news bodies.
+- Treat fetched page text as transient processing input and discard it after
+  classification/aggregation unless a short audit excerpt is justified.
+- Keep the existing 202604 local judgment index only as a prototype fixture.
+
 ## Current Implementation
 
 ### Language
@@ -35,8 +60,8 @@ The frontend is a lightweight SPA with four routes:
 
 1. `#overview` - 總覽儀表板
 2. `#opinion` - 輿論情報
-3. `#cross-observation` - 交叉觀測
-4. `#database` - 裁判資料庫
+3. `#truth` - 輿情真相
+4. `#database` - 裁判來源索引
 
 Design direction:
 
@@ -60,12 +85,13 @@ Use this until the information architecture and data model stabilize.
 
 ### Option B: Production Web App
 
-Recommended after fact extraction is validated.
+Recommended after the bounded metrics pilot is validated.
 
 - Backend: FastAPI or Flask
 - Database: PostgreSQL or Supabase
 - Frontend: React, Vue, or SvelteKit
-- Search: PostgreSQL full text, Meilisearch, or OpenSearch
+- Search: PostgreSQL indexed metric/source metadata; no judgment full-text
+  search is required for the revised scope
 - Automation: n8n scheduled ingest and extraction jobs
 
 ### Option C: Analytics BI Stack
@@ -119,42 +145,33 @@ The public opinion layer should be separate from court data. It should not be mi
 - Treat public opinion as perception data, not proof of unfair judgment.
 - Use manual review for high-impact claims.
 
-## Cross Observation Dashboard Concept
+## Official and Opinion Comparison Dashboard Concept
 
-The cross-observation layer compares three things without treating public opinion as proof:
+The comparison layer uses three numerical dimensions without treating public
+opinion as proof:
 
-1. Court data signals
-2. Public opinion signals
-3. Manually verified extraction results
+1. Official monthly statistics
+2. Public-opinion attention metrics
+3. Source coverage and classification quality
 
 Useful outputs:
 
-- High court-data volume, low public attention
-- Low court-data volume, high public attention
-- Similar cases with divergent outcomes
-- Cases with strong public controversy but weak evidence linkage
-- Cases where public concern and court-data outliers align
+- High official volume, low public attention
+- Low official volume, high public attention
+- Official and opinion trends moving in different directions
+- Topic shares by source and month
+- Coverage gaps caused by missing or unstable sources
 
 ## Next Technical Step
 
-Build `extract_judgment_facts.py` after UI review.
+Build a bounded metrics pilot before redesigning the charts:
 
-Initial extraction table:
-
-- jid
-- plaintiff_text
-- defendant_text
-- main_text
-- legal_basis_text
-- claim_amount
-- awarded_amount
-- sentence_text
-- result_label
-- extraction_method
-- extraction_confidence
-- needs_manual_review
-
-This second table is required before the dashboard can make stronger claims about judgment patterns or fairness signals.
+1. Normalize one official monthly offense-statistics source.
+2. Collect one public-opinion source for the same categories and time range.
+3. Store counts, URLs, dates, category, source, confidence, and run metadata;
+   discard unnecessary body text.
+4. Compare monthly official volume and public attention, then choose the final
+   charts from observed fields and coverage.
 
 ## Summary Provider Decision
 

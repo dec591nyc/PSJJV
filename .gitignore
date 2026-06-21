@@ -4,4 +4,5 @@ data/exports/*.csv
 __pycache__/
 *.pyc
 data/202604
+data/official/
 .playwright-cli

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import sqlite3
@@ -48,6 +49,46 @@ OPINION_SOURCES = [
     {"name": "新聞媒體", "status": "not_configured"},
     {"name": "法律／司改評論", "status": "not_configured"},
 ]
+
+OFFICIAL_CATEGORY_MAP = [
+    ("fraud", "詐欺背信", ("詐欺背信",)),
+    ("injury", "傷害", ("傷害",)),
+    ("sexual_offense", "妨害性自主罪", ("妨害性自主罪",)),
+    ("public_integrity", "貪污／瀆職", ("違反貪污治罪條例", "瀆職")),
+    ("election_law", "違反選罷法", ("違反選罷法",)),
+]
+
+
+def load_official_profiles(stats_root: Path) -> list[dict]:
+    profiles = []
+    if not stats_root.exists():
+        return profiles
+    for path in sorted(stats_root.glob("*/profile.json")):
+        try:
+            profile = json.loads(path.read_text(encoding="utf-8"))
+            profile["_directory"] = str(path.parent)
+            profiles.append(profile)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return profiles
+
+
+def official_category_counts(profile: dict) -> list[dict]:
+    focus = profile.get("focus_national_totals", {})
+    return [
+        {
+            "category": key,
+            "label": label,
+            "count": sum(int(focus.get(source_label) or 0) for source_label in source_labels),
+        }
+        for key, label, source_labels in OFFICIAL_CATEGORY_MAP
+    ]
+
+
+def percent_change(current: int, previous: int | None) -> float | None:
+    if previous in {None, 0}:
+        return None
+    return round((current - previous) / previous * 100, 2)
 
 
 def connect_readonly(db_path: Path) -> sqlite3.Connection:
@@ -133,8 +174,9 @@ def aggregate_summary(month: str, total: int, by_domain: list[dict], categories:
 
 
 class DashboardHandler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, db_path: Path, static_dir: Path, **kwargs):
+    def __init__(self, *args, db_path: Path, static_dir: Path, stats_root: Path, **kwargs):
         self.db_path = db_path
+        self.stats_root = stats_root
         super().__init__(*args, directory=str(static_dir), **kwargs)
 
     def send_json(self, payload, status=200):
@@ -152,6 +194,8 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             return self.handle_months()
         if parsed.path == "/api/summary":
             return self.handle_summary(parsed)
+        if parsed.path == "/api/official-summary":
+            return self.handle_official_summary(parsed)
         if parsed.path == "/api/opinion":
             return self.handle_opinion(parsed)
         if parsed.path == "/api/judgments":
@@ -162,17 +206,100 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def handle_months(self):
-        conn = connect_readonly(self.db_path)
-        rows = rows_to_dicts(conn.execute(
-            """
-            SELECT source_month, COUNT(*) AS count
-            FROM judgments
-            GROUP BY source_month
-            ORDER BY source_month DESC
-            """
-        ).fetchall())
-        conn.close()
+        profiles = load_official_profiles(self.stats_root)
+        rows = [
+            {
+                "source_month": profile["source_month"],
+                "count": int(profile.get("focus_national_totals", {}).get("總計") or 0),
+            }
+            for profile in reversed(profiles)
+        ]
         self.send_json({"items": rows})
+
+    def handle_official_summary(self, parsed):
+        profiles = load_official_profiles(self.stats_root)
+        if not profiles:
+            return self.send_json({"error": "official statistics not found"}, status=404)
+
+        query = parse_qs(parsed.query)
+        profile_by_month = {profile["source_month"]: profile for profile in profiles}
+        month = query.get("month", [profiles[-1]["source_month"]])[0]
+        profile = profile_by_month.get(month)
+        if profile is None:
+            return self.send_json({"error": f"official month not found: {month}"}, status=404)
+
+        selected_metric = query.get("metric", ["詐欺背信"])[0]
+        current_focus = profile.get("focus_national_totals", {})
+        index = profiles.index(profile)
+        previous = profiles[index - 1] if index > 0 else None
+        previous_focus = previous.get("focus_national_totals", {}) if previous else {}
+        categories = official_category_counts(profile)
+        previous_categories = {
+            item["category"]: item["count"] for item in official_category_counts(previous)
+        } if previous else {}
+
+        long_path = Path(profile["_directory"]) / "normalized_long.csv"
+        region_counts = []
+        if long_path.exists():
+            with long_path.open("r", encoding="utf-8-sig", newline="") as source:
+                for row in csv.DictReader(source):
+                    if row.get("metric") != selected_metric:
+                        continue
+                    if row.get("geography") in {"機關別總計", "署所屬機關"}:
+                        continue
+                    region_counts.append({
+                        "geography": row.get("geography", ""),
+                        "count": int(row.get("value") or 0),
+                    })
+        region_counts.sort(key=lambda item: item["count"], reverse=True)
+
+        total = int(current_focus.get("總計") or 0)
+        previous_total = int(previous_focus.get("總計") or 0) if previous else None
+        monthly_counts = [
+            {
+                "month": item["source_month"],
+                "count": int(item.get("focus_national_totals", {}).get("總計") or 0),
+            }
+            for item in profiles
+        ]
+        category_counts = []
+        for item in categories:
+            category_counts.append({
+                **item,
+                "change_pct": percent_change(item["count"], previous_categories.get(item["category"])),
+            })
+
+        metric_quality = profile.get("metrics", [])
+        matched = sum(1 for item in metric_quality if item.get("components_match_total"))
+        self.send_json({
+            "source_month": month,
+            "source_url": profile.get("source_url"),
+            "dataset_id": profile.get("dataset_id"),
+            "total_cases": total,
+            "total_change_pct": percent_change(total, previous_total),
+            "monthly_counts": monthly_counts,
+            "category_counts": category_counts,
+            "region_metric": selected_metric,
+            "region_counts": region_counts,
+            "quality": {
+                "raw_rows": profile.get("raw_row_count"),
+                "selected_rows": profile.get("row_count"),
+                "duplicate_rows_dropped": profile.get("duplicate_single_month_range_rows_dropped"),
+                "metric_count": profile.get("metric_count"),
+                "matched_metric_totals": matched,
+                "invalid_cells": len(profile.get("invalid_cells", [])),
+                "dash_zero_cells": profile.get("dash_value_count"),
+            },
+            "summary": {
+                "text": (
+                    f"{month[:4]} 年 {int(month[4:])} 月受（處）理刑事案件共 {total:,} 件；"
+                    f"詐欺背信 {int(current_focus.get('詐欺背信') or 0):,} 件、"
+                    f"傷害 {int(current_focus.get('傷害') or 0):,} 件、"
+                    f"妨害性自主罪 {int(current_focus.get('妨害性自主罪') or 0):,} 件。"
+                ),
+                "method": "MOI dataset 9603 descriptive statistics",
+            },
+        })
 
     def handle_summary(self, parsed):
         query = parse_qs(parsed.query)
@@ -201,14 +328,13 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 "label": CATEGORY_LABELS[category],
                 "count": count,
             })
-        daily_counts = rows_to_dicts(conn.execute(
-            f"""
-            SELECT substr(jdate, 1, 10) AS date, COUNT(*) AS count
-            FROM judgments {where} AND COALESCE(jdate, '') <> ''
-            GROUP BY substr(jdate, 1, 10)
-            ORDER BY date
-            """,
-            params,
+        monthly_counts = rows_to_dicts(conn.execute(
+            """
+            SELECT source_month AS month, COUNT(*) AS count
+            FROM judgments
+            GROUP BY source_month
+            ORDER BY source_month
+            """
         ).fetchall())
         top_courts = rows_to_dicts(conn.execute(
             f"""
@@ -236,7 +362,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             "total_judgments": total,
             "by_case_domain": by_domain,
             "category_counts": category_counts,
-            "daily_counts": daily_counts,
+            "monthly_counts": monthly_counts,
             "top_courts": top_courts,
             "top_titles": top_titles,
             "summary": aggregate_summary(month, total, by_domain, category_counts),
@@ -356,11 +482,18 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--db", type=Path, default=Path("data/local/public_safety.sqlite"))
     parser.add_argument("--static", type=Path, default=Path("web"))
+    parser.add_argument("--stats", type=Path, default=Path("output/official_statistics"))
     args = parser.parse_args()
 
     if not args.db.exists():
         raise SystemExit(f"SQLite DB not found: {args.db}")
-    handler = lambda *a, **kw: DashboardHandler(*a, db_path=args.db, static_dir=args.static, **kw)
+    handler = lambda *a, **kw: DashboardHandler(
+        *a,
+        db_path=args.db,
+        static_dir=args.static,
+        stats_root=args.stats,
+        **kw,
+    )
     server = ThreadingHTTPServer((args.host, args.port), handler)
     print(f"Review dashboard: http://{args.host}:{args.port}")
     print(f"SQLite DB: {args.db}")
