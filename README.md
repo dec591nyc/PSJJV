@@ -37,7 +37,7 @@ flowchart TD
         C --> E[serve_review_dashboard.py]
     end
 
-    subgraph 前端展示 (SPA)
+    subgraph 前端展示 SPA
         E -->|API 數據傳輸| F[vanilla JS app.js]
         F --> G[官方統計 - ICCS 分類及風險排行]
         F --> H[輿論情報 - 情感分析與議題摘要]
