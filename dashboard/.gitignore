@@ -41,5 +41,3 @@ yarn-error.log*
 next-env.d.ts
 
 # static API JSON files
-/public/static_api/
-
