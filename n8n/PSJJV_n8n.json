@@ -1,0 +1,65 @@
+{
+  "name": "PSJJV",
+  "nodes": [
+    {
+      "parameters": {
+        "command": "cd /home/node/public-safety-dashboard && python3 scripts/run_daily_update.py && python3 scripts/generate_static_json.py"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -224,
+        -208
+      ],
+      "id": "d2f1add4-d695-4165-8a9e-c74eb8f7a830",
+      "name": "Execute Command"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "months",
+              "triggerAtDayOfMonth": 25,
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -432,
+        -208
+      ],
+      "id": "8a22e57f-569f-4ae8-96f0-4a4f52bfec4a",
+      "name": "Schedule Trigger",
+      "alwaysOutputData": true,
+      "executeOnce": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "361c7503-1ef1-4268-a085-75d1882284b4",
+  "meta": {
+    "instanceId": "f0a86745edf3e88ccd10662a0aa0b6e98e0b6d6b0c4133b48194404ba3771a2c"
+  },
+  "id": "1Sea5iZUdVaH8B0l",
+  "tags": []
+}
