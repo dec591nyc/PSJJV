@@ -26,19 +26,19 @@
 
 ```mermaid
 flowchart TD
-    subgraph 數據獲取與處理 (Data Pipeline)
+    subgraph "數據獲取與處理 (Data Pipeline)"
         A[司法院公開刑事數據 / API] -->|generate_static_json.py| B[編譯輸出 static_api JSON]
         B -->|upload_to_supabase.py| C[(Supabase Postgres Database)]
     end
 
-    subgraph 儀表板服務 (Next.js Dashboard)
+    subgraph "儀表板服務 (Next.js Dashboard)"
         D[Next.js API Routes] -->|優先讀取| C
         D -->|連線失敗/缺省時自動降級| E[dashboard/public/static_api/*.json]
         E --> F[React 前端展示 / Recharts 渲染]
         C --> F
     end
 
-    subgraph 靜態演示 (GitHub Pages SPA)
+    subgraph "靜態演示 (GitHub Pages SPA)"
         B -->|同步複製| G[docs/static_api/*.json]
         H[Vanilla JS app.js] -->|直接載入| G
     end
