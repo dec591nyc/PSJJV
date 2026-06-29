@@ -1,4 +1,4 @@
-# 公眾治安與司法正義檢視網 (Public Safety & Judicial Justice Analytics)
+# 台灣地方治安統計與資料完整度審計平台 (Taiwan Local Public Safety Statistics & Data Integrity Audit Platform)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Next.js-14.2-black?style=for-the-badge&logo=next.js" alt="Next.js" />
@@ -8,17 +8,23 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="MIT License" />
 </p>
 
-💡 **一個結合 Next.js 現代化儀表板與 Python 自動化數據管道的治安統計主題視覺化平台。以數據為基石，探索台灣治安趨勢、案類佔比與縣市分布特徵。**
+💡 **本平台是結合 Next.js 數據儀表板與 Python 自動化數據管道的治安統計分析平台，並採用 n8n 於內政部刑事案件數據集（代號 9603）實現自動化資料撈取、校對與完整度審計，研判各類犯罪的月度趨勢、六都分布及 YoY 增減變化。**
 
 ---
 
-## 🎯 專案核心定位
+## 🎯 專案核心定位與特色
 
-本專案非重建或儲存海量的裁判書全文庫，而是透過輕量、高效的自動化數據管道（Data Pipeline），提取並對照兩大核心維度：
-1. **司法裁判與案類特徵數據**：透過 Python 解析司法院刑事判決元數據，統計各類犯罪（如詐欺、人身安全等）的月份趨勢、縣市分布、增減率（YoY）與佔比關係。
-2. **高可用雙模架構 (Dual-Mode Design)**：
-   * **資料庫主動模式 (Database Mode)**：連接到 Supabase PostgreSQL 資料庫，即時載入最新月度與年度統計。
-   * **靜態備份模式 (Static API Fallback)**：當資料庫連線中斷或為零成本託管時，系統會自動降級讀取本地預先編譯的 `public/static_api/*.json` 靜態快取，確保服務 100% 不中斷。
+本專案專注於提供**具備高可信度的官方刑事統計儀表板**。本平台核心特色如下：
+
+1. **官方案件範疇定位**：
+   呈現數據均為警政機關**「受理並登記之刑事案件發生件數」**。資料來源為內政部統計月報，保障數據公正性與一致性。
+2. **內建數據審計校對（Data Integrity Controls）**：
+   管線內建自動化對帳機制，檢驗**「全國刑事發生總計」**是否等於**「各行政區及案類統計加總」**。若發現不一致（校對差額不為 0），則觸發警告。
+3. **高可用雙模架構 (Dual-Mode Design)**：
+   * **資料庫主動模式 (Database Mode)**：連接到 Supabase PostgreSQL 資料庫，提供最即時的數據載入。
+   * **靜態快取備份模式 (Static API Fallback)**：自動降級至讀取本地編譯的 `public/static_api/*.json` 檔案，確保零成本部署時依然 100% 正常運作。
+4. **無本機儲存限制雲端模式 (Zero-Persistence Cloud Mode)**：
+   因應 Serverless、Docker、n8n 等無寫入權限或無狀態託管環境，系統支援全記憶體運作。資料可直接由爬蟲下載並推送到雲端 Supabase，本機無須留存任何 SQLite 資料庫或 JSON 檔案。
 
 ---
 
@@ -26,36 +32,45 @@
 
 ```mermaid
 flowchart TD
-    subgraph "數據獲取與處理 (Data Pipeline)"
-        A[司法院公開刑事數據 / API] -->|generate_static_json.py| B[編譯輸出 static_api JSON]
-        B -->|upload_to_supabase.py| C[(Supabase Postgres Database)]
+    subgraph "數據源 (Data Source)"
+        A[內政部統計網\n刑事統計數據集 9603]
     end
 
-    subgraph "儀表板服務 (Next.js Dashboard)"
-        D[Next.js API Routes] -->|優先讀取| C
-        D -->|連線失敗/缺省時自動降級| E[dashboard/public/static_api/*.json]
-        E --> F[React 前端展示 / Recharts 渲染]
-        C --> F
+    subgraph "自動化管線 (n8n / Python)"
+        B["run_daily_update.py\n(下載、清洗、寫入 Supabase)"]
+        C["generate_static_json.py\n(臨時 SQLite 鏡像計算 & 編譯)"]
+        A -->|CSV 數據| B
+        B -->|更新 Postgres 表| D["(Supabase 雲端資料庫)"]
+        D -->|拉取計算| C
+        C -->|自動上傳 JSONB| D
     end
 
-    subgraph "靜態演示 (GitHub Pages SPA)"
-        B -->|同步複製| G[docs/static_api/*.json]
-        H[Vanilla JS app.js] -->|直接載入| G
+    subgraph "前端儀表板 (Next.js App)"
+        F[Next.js API 路由] -->|1. 優先查詢 JSONB| D
+        F -->|2. 資料庫不可用時自動降級| G[public/static_api/*.json]
+        G --> H[React 前端 / Recharts 渲染]
+        D -->|提供最新資料| H
+    end
+
+    subgraph "純靜態版 (GitHub Pages SPA)"
+        C -->|非雲端模式時複製| I[docs/static_api/*.json]
+        J[Vanilla JS app.js] -->|讀取| I
     end
 ```
 
 ---
 
-## 🛠️ 目錄結構說明
+## 📂 目錄結構與模組說明
 
 ```text
-├── dashboard/                   # Next.js 14 現代化數據儀表板 (本專案核心)
+├── dashboard/                   # Next.js 數據儀表板 (本專案核心)
 │   ├── src/app/                 # App Router (首頁、API 路由、折線與堆疊圖表)
-│   ├── public/static_api/       # 靜態降級 API 快取目錄 (由 Python 自動生成與同步)
-│   └── next.config.mjs          # 排除原生 pg 套件 Webpack 打包配置
+│   ├── public/static_api/       # 靜態降級 API 快取目錄 (無資料庫模式的 fallback)
+│   └── next.config.mjs          # Next.js 配置與排除 Webpack 打包
 ├── scripts/                     # Python 數據管道與編譯工具
-│   ├── generate_static_json.py  # [最重要] 爬蟲數據編譯與導出 (已 bypass ICCS 提速)
-│   ├── upload_to_supabase.py    # 同步 static_api 至 Supabase Database 腳本
+│   ├── run_daily_update.py      # [主更新] 下載官方 CSV，對齊並寫入 SQLite/Postgres
+│   ├── generate_static_json.py  # [主編譯] 將資料編譯為 JSON，並自動上傳至 Supabase
+│   ├── upload_to_supabase.py    # [上傳模組] 將彙整 JSON 寫入 Supabase 的 official_summaries
 │   └── serve_review_dashboard.py# 舊版本地 Python API 伺服器 (供 Vanilla 測試)
 ├── docs/                        # 用於 GitHub Pages 託管的 Vanilla JS 靜態版
 ├── sql/                         # 資料庫結構描述檔 (SQLite / Postgres)
@@ -64,91 +79,46 @@ flowchart TD
 
 ---
 
-## 🚀 部署指南 (Deployment Guide)
+## 🚀 部署與本地開發
 
-### 第一步：Supabase 資料庫設定與資料遷移
-
-1. **建立 Supabase 專案**：
-   前往 [Supabase](https://supabase.com) 註冊並新建一個資料庫專案。
-2. **匯入資料表結構**：
-   進入 Supabase 後台的 **SQL Editor**，複製並執行 `sql/schema_postgres.sql` 的內容，或直接建立存放彙整資料的 `official_summaries` 表：
-   ```sql
-   CREATE TABLE IF NOT EXISTS official_summaries (
-     source_month TEXT PRIMARY KEY,
-     summary_json JSONB NOT NULL,
-     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-   );
+### 1. 雲端資料庫模式（Supabase / PostgreSQL）
+1. 進入 Supabase 控制台的 **SQL Editor**，執行 `sql/schema_postgres.sql` 的內容以初始化資料表結構。
+2. 取得您的 Supabase PostgreSQL 連線 URL。
+3. 在終端機中設定環境變數：
+   ```powershell
+   $env:PUBLIC_SAFETY_DATABASE_URL="postgresql://postgres:[PASSWORD]@db.[PROJECT].supabase.co:5432/postgres"
    ```
-3. **執行 Python 資料上傳**：
-   在本地將資料庫連線字串設定至環境變數中，並執行遷移腳本將現有月份資料一次性同步至 Supabase：
-   ```bash
-   # 設定 Supabase 連線 URL
-   $env:PUBLIC_SAFETY_DATABASE_URL="your_supabase_postgresql_connection_string"
-   
-   # 執行上傳
-   python scripts/upload_to_supabase.py
-   ```
+4. 在 Vercel 部署 Next.js 儀表板時，亦請在 Vercel 後台填寫此環境變數。
 
----
-
-### 第二步：部署 Next.js 儀表板至 Vercel
-
-本專案完全支援 Vercel 一鍵部署：
-
-1. **將專案推送到您的 GitHub 儲存庫**：
-   請確保已將 `.env.local` 加入 `.gitignore` 中，**切勿將敏感私鑰推送到 GitHub**。
-2. **在 Vercel 中匯入專案**：
-   * 登入 Vercel 點選 **Add New > Project**，選取您的 GitHub 專案。
-   * 將 Root Directory 設定為 `dashboard`。
-3. **配置環境變數 (Environment Variables)**：
-   在 Vercel 專案設定的 Environment Variables 中，新增以下變數：
-   * **名稱**：`PUBLIC_SAFETY_DATABASE_URL`
-   * **值**：您的 Supabase PostgreSQL 連線字串（例如 `postgresql://postgres:password@db.xxxx.supabase.co:5432/postgres`）。
-4. **點擊 Deploy**：
-   部署完成後即可獲得專屬的線上儀表板連結！
-
-> [!NOTE]  
-> **無資料庫託管模式**：如果您在 Vercel 上不設定 `PUBLIC_SAFETY_DATABASE_URL` 環境變數，Next.js 會自動啟用備用模式，直接讀取並提供 `dashboard/public/static_api/` 下的 JSON 快取檔案。這適合用於低負擔、零成本的展示網站。
-
----
-
-### 第三步：靜態網頁託管至 GitHub Pages
-
-本專案的 `docs` 目錄已預先同步了前端 Vanilla SPA 及完整的靜態快取資料。若您只想託管純靜態頁面：
-
-1. 前往 GitHub 該專案儲存庫的 **Settings** 頁面。
-2. 點選左欄 **Pages**。
-3. 在 Build and deployment 中，將 Source 設定為 **Deploy from a branch**。
-4. Branch 選擇 `main` (或您的主分支)，資料夾選取 **`/docs`** 點選 Save。
-5. 數分鐘後即可透過 `https://<username>.github.io/<repo-name>/` 存取靜態版治安檢視網！
-
----
-
-## 💻 本地開發指南 (Local Development)
-
-### 1. 啟動 Next.js 數據儀表板
+### 2. 資料庫更新與編譯
 ```bash
-# 進入 dashboard 資料夾
+# 安裝 Python 依賴
+pip install psycopg2-binary
+
+# 1. 抓取最新月份官方資料並寫入資料庫
+py scripts/run_daily_update.py
+
+# 2. 自動編譯 JSON 彙整檔並直接上傳至 Supabase（全自動化，免去手動上傳）
+py scripts/generate_static_json.py
+```
+
+### 3. 本地啟動前端開發服務
+```bash
 cd dashboard
-
-# 安裝 Node 依賴項目
 npm install
-
-# 啟動開發伺服器
 npm run dev
 ```
-啟動後訪問 `http://localhost:3000` 即可進行預覽與修改。
-
-### 2. 重新編譯本地靜態快取
-當資料庫有更新或需要生成全新快取檔時，請在專案根目錄下執行：
-```bash
-python scripts/generate_static_json.py
-```
-*腳本會自動將產出的 JSON 檔案同步到 `docs/static_api/` 及 `dashboard/public/static_api/` 中。*
+啟動後訪問 `http://localhost:3000` 即可預覽。
 
 ---
 
-## 📝 授權與宣告 (License & Disclaimer)
+## 🧠 專案開發收穫 (Key Takeaways)
 
-* 本專案開源授權採用 **MIT License**。
-* 本專案僅供學術探討、個人職涯作品集展示與技術驗證使用。請勿將其產出的輿情聲量模擬或預算數據直接引用為司法不公或犯罪現狀之實體結論。
+透過專案的重構與優化，實踐了現代數據工程與前端架構中的幾個重要解決方案：
+
+1. **嚴謹的「對帳與審計」數據工程思維**
+   處理政府開放數據（Open Data）時，欄位對齊、缺漏與四捨五入往往會造成統計誤差。在 Python 管道中加入了對帳檢驗（Reconciliation Check），利用「全國總計」與「地方行政區加總」的差值對照，實現了數據落地的檢驗保證，在源頭杜絕了髒數據污染。
+2. **適應唯讀環境（Read-Only System）的無本機儲存設計**
+   面對 Serverless 與自動化排程器（如 n8n）可能沒有本地硬碟寫入權限的問題，實現了「以記憶體和臨時空間鏡像運算」的策略。藉由 Python 建立臨時 SQLite 進行高速 SQL 計算、完成後上傳 Supabase 並自動清理本機磁碟，確保了系統可以在任何限制環境中 100% 正常運行。
+3. **優雅的雙模容錯架構（Active-Fallback Design）**
+   Next.js 後端 API 設計了雙重降級保護。優先以高響應速度的 Supabase PostgreSQL 提供服務，若資料庫發生異常或為零成本託管，會自動無縫切換至本地的靜態 JSON API 快取。前端 React 與 Vanilla JS 能在無感的情況下繼續渲染，大幅強化了系統的韌性。
