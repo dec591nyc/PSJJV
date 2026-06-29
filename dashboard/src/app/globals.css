@@ -59,7 +59,9 @@ h4 { font-size: 18px; line-height: 1.25; }
   gap: 24px;
   padding: 26px 36px;
   color: white;
-  background: linear-gradient(135deg, #091a33 0%, #163660 100%);
+  background: linear-gradient(135deg, rgba(9, 26, 51, 0.9) 0%, rgba(22, 54, 96, 0.85) 100%), url('/safety_header_banner.png');
+  background-size: cover;
+  background-position: center;
   border-bottom: 3px solid #d97706;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
@@ -695,25 +697,28 @@ main { width: 100%; max-width: 1500px; margin: 0 auto; padding: 22px 32px 56px; 
 }
 .feedback-paths {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   margin: 0;
+  padding: 4px 0;
 }
 .feedback-paths div {
-  display: grid;
-  grid-template-columns: 76px minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--line);
 }
 .feedback-paths dt {
   color: var(--muted-ink);
-  font-size: 11px;
-  font-weight: 850;
+  font-size: 13px;
+  font-weight: 700;
 }
 .feedback-paths dd {
   margin: 0;
-  overflow-wrap: anywhere;
-  color: #2f3c34;
+  color: var(--ink);
   font-family: var(--number-font);
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
 }
 .feedback-actions {
   display: flex;

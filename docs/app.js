@@ -21,7 +21,7 @@ const state = {
   activeMetric: null,
   activeView: 'year',
   activeAnnualTab: 'kpi',
-  dataMode: 'month',
+  dataMode: 'year',
   allMonths: []
 };
 
@@ -95,7 +95,7 @@ async function getJson(url) {
       fetchUrl = 'static_api/months.json';
     } else if (url.startsWith('/api/official-summary')) {
       const parts = url.split('?');
-      const month = parts[1] ? (new URLSearchParams(parts[1]).get('month') || '202604') : '202604';
+      const month = parts[1] ? (new URLSearchParams(parts[1]).get('month') || '2026_annual') : '2026_annual';
       fetchUrl = `static_api/official-summary_${month}.json`;
     }
   }
@@ -108,7 +108,7 @@ async function getJson(url) {
     if (!isStaticDemo && fetchUrl === url) {
       const fallback = url === '/api/months'
         ? 'static_api/months.json'
-        : `static_api/official-summary_${new URLSearchParams(url.split('?')[1] || '').get('month') || '202604'}.json`;
+        : `static_api/official-summary_${new URLSearchParams(url.split('?')[1] || '').get('month') || '2026_annual'}.json`;
       const response = await fetch(fallback);
       if (!response.ok) throw error;
       return response.json();
@@ -118,7 +118,9 @@ async function getJson(url) {
 }
 
 function currentMonth() {
-  return el('month')?.value || '202604';
+  const dropdownValue = el('month')?.value;
+  if (dropdownValue) return dropdownValue;
+  return state.dataMode === 'year' ? '2026_annual' : '202605';
 }
 
 function topicList() {
@@ -885,9 +887,17 @@ function populateMonthDropdown() {
   
   let filtered = [];
   if (state.dataMode === 'year') {
-    filtered = state.allMonths.filter(item => item.source_month.endsWith('_annual'));
+    const years = Array.from(new Set(
+      state.allMonths
+        .map(item => item.source_month.slice(0, 4))
+        .filter(y => /^\d{4}$/.test(y))
+    )).sort((a, b) => b.localeCompare(a));
+    filtered = years.map(year => ({
+      source_month: `${year}_annual`,
+      count: 0
+    }));
   } else {
-    filtered = state.allMonths.filter(item => !item.source_month.endsWith('_annual'));
+    filtered = state.allMonths.filter(item => !item.source_month.endsWith('_annual') && /^\d{6}$/.test(item.source_month));
   }
   
   selectEl.innerHTML = filtered.map(item =>
@@ -916,19 +926,50 @@ function bindEvents() {
   if (monthBtn && yearBtn) {
     monthBtn.addEventListener('click', () => {
       if (state.dataMode === 'month') return;
+      
+      const currentVal = el('month')?.value || '';
+      let year = '2026';
+      if (currentVal.endsWith('_annual')) {
+        year = currentVal.split('_')[0];
+      } else if (/^\d{6}$/.test(currentVal)) {
+        year = currentVal.slice(0, 4);
+      }
+      
       state.dataMode = 'month';
       monthBtn.classList.add('is-active');
       yearBtn.classList.remove('is-active');
       populateMonthDropdown();
+      
+      const matchingMonth = state.allMonths.find(item => item.source_month.startsWith(year) && !item.source_month.endsWith('_annual'));
+      if (matchingMonth && el('month')) {
+        el('month').value = matchingMonth.source_month;
+      } else if (state.allMonths.length > 0 && el('month')) {
+        el('month').value = state.allMonths[0].source_month;
+      }
+      
       loadSummary().catch(handleError);
     });
     
     yearBtn.addEventListener('click', () => {
       if (state.dataMode === 'year') return;
+      
+      const currentVal = el('month')?.value || '';
+      let year = '2026';
+      if (/^\d{6}$/.test(currentVal)) {
+        year = currentVal.slice(0, 4);
+      } else if (currentVal.endsWith('_annual')) {
+        year = currentVal.split('_')[0];
+      }
+      
       state.dataMode = 'year';
       yearBtn.classList.add('is-active');
       monthBtn.classList.remove('is-active');
       populateMonthDropdown();
+      
+      if (el('month')) {
+        el('month').value = `${year}_annual`;
+      }
+      
       loadSummary().catch(handleError);
     });
   }

@@ -7,7 +7,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-def main():
+def main(static_api_dir=None):
     pg_url = os.environ.get("PUBLIC_SAFETY_DATABASE_URL")
     if not pg_url:
         print("Error: PUBLIC_SAFETY_DATABASE_URL environment variable is not set. Skipping upload.")
@@ -21,7 +21,11 @@ def main():
         print("psycopg2 is not installed. Please run: pip install psycopg2-binary")
         return
 
-    static_api_dir = Path("web/static_api")
+    if static_api_dir is None:
+        static_api_dir = Path("web/static_api")
+    else:
+        static_api_dir = Path(static_api_dir)
+
     if not static_api_dir.exists():
         print(f"Error: {static_api_dir} does not exist. Please run generate_static_json.py first.")
         return

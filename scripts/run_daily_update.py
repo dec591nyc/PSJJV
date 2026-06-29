@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python
+#!/usr/bin/env python
 """Unified daily update script to sync MOI statistics and crawl opinion data."""
 
 from __future__ import annotations
@@ -18,9 +18,8 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-# Add current scripts directory to sys.path to allow importing scrape_judicial_data
+# Add current scripts directory to sys.path to allow importing metric_styles
 sys.path.append(str(Path(__file__).resolve().parent))
-from scrape_judicial_data import scrape_and_parse
 from metric_styles import sync_metric_styles
 
 # Base Configurations

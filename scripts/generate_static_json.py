@@ -2618,15 +2618,71 @@ def main():
 
 
 
-    db_path = Path("data/local/public_safety.sqlite")
+    import os
+    import sys
+    import tempfile
+    pg_url = os.environ.get("PUBLIC_SAFETY_DATABASE_URL")
+    temp_dir_obj = None
+    temp_db_path = None
 
+    if pg_url:
+        print("PUBLIC_SAFETY_DATABASE_URL is set. Setting up temporary workspace...")
+        temp_dir_obj = tempfile.TemporaryDirectory()
+        static_api_dir = Path(temp_dir_obj.name)
 
+        # Create a temporary SQLite database file
+        fd, temp_db_str = tempfile.mkstemp(suffix=".sqlite")
+        os.close(fd)
+        temp_db_path = Path(temp_db_str)
+        db_path = temp_db_path
 
-    static_api_dir = Path("web/static_api")
+        # Download tables from Postgres to this temporary SQLite
+        print("Syncing data from Supabase to temporary SQLite database...")
+        try:
+            import psycopg2
+            pg_conn = psycopg2.connect(pg_url)
+            lite_conn = sqlite3.connect(db_path)
 
+            # Recreate schema in temp SQLite
+            schema_file = Path(__file__).resolve().parent.parent / "sql" / "schema_sqlite.sql"
+            lite_conn.executescript(schema_file.read_text(encoding="utf-8"))
 
+            # Copy crime_categories
+            pg_cur = pg_conn.cursor()
+            pg_cur.execute("SELECT metric, iccs_code, iccs_name, severity_score, flag_cyber, flag_weapon, flag_domestic, flag_organized_fraud FROM crime_categories")
+            rows = pg_cur.fetchall()
+            lite_conn.executemany(
+                "INSERT INTO crime_categories VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                rows
+            )
 
-    static_api_dir.mkdir(parents=True, exist_ok=True)
+            # Copy official_metric_styles
+            pg_cur.execute("SELECT metric, color, sort_order, is_total, updated_at FROM official_metric_styles")
+            rows = pg_cur.fetchall()
+            lite_conn.executemany(
+                "INSERT INTO official_metric_styles VALUES (?, ?, ?, ?, ?)",
+                rows
+            )
+
+            # Copy official_statistics
+            pg_cur.execute("SELECT source_month, geography, metric, raw_value, value_status FROM official_statistics")
+            rows = pg_cur.fetchall()
+            lite_conn.executemany(
+                "INSERT INTO official_statistics VALUES (?, ?, ?, ?, ?)",
+                rows
+            )
+
+            lite_conn.commit()
+            lite_conn.close()
+            pg_conn.close()
+            print("Successfully mirrored Supabase database into temporary SQLite!")
+        except Exception as e:
+            print(f"Error mirroring Supabase to SQLite: {e}")
+            sys.exit(1)
+    else:
+        db_path = Path("data/local/public_safety.sqlite")
+        static_api_dir = Path("web/static_api")
+        static_api_dir.mkdir(parents=True, exist_ok=True)
 
 
 
@@ -4972,7 +5028,27 @@ def main():
 
     import shutil
 
-
+    if pg_url:
+        print("\nPG Cloud Mode: uploading directly to Supabase and skipping local folder sync.")
+        try:
+            from upload_to_supabase import main as upload_main
+            upload_main(static_api_dir)
+        except Exception as e:
+            print(f"Supabase sync hook failed: {e}")
+        finally:
+            if temp_db_path and temp_db_path.exists():
+                try:
+                    temp_db_path.unlink()
+                    print("Cleaned up temporary SQLite database file.")
+                except:
+                    pass
+            if temp_dir_obj:
+                try:
+                    temp_dir_obj.cleanup()
+                    print("Cleaned up temporary workspace directory.")
+                except:
+                    pass
+        return
 
     docs_api_dir = Path("docs/static_api")
 

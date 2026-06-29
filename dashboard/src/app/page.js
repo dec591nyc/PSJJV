@@ -75,7 +75,7 @@ const formatPct = (value) => {
 
 export default function DashboardPage() {
   const [activeView, setActiveView] = useState('year'); // 'year', 'topics', 'local', 'method', 'feedback'
-  const [dataMode, setDataMode] = useState('month'); // 'month', 'year'
+  const [dataMode, setDataMode] = useState('year'); // 'month', 'year'
   const [allMonths, setAllMonths] = useState([]);
   const [selectedMonth, setSelectedMonth] = useState('');
   const [summary, setSummary] = useState(null);
@@ -107,15 +107,16 @@ export default function DashboardPage() {
         setAllMonths(items);
         
         if (items.length > 0) {
-          setSelectedMonth(items[0].source_month);
+          const defaultMonth = items[0].source_month;
+          setSelectedMonth(dataMode === 'year' ? `${defaultMonth.slice(0, 4)}_annual` : defaultMonth);
         } else {
           setAllMonths([{ source_month: '202605', count: 0 }]);
-          setSelectedMonth('202605');
+          setSelectedMonth(dataMode === 'year' ? '2026_annual' : '202605');
         }
       } catch (err) {
         console.error("Failed to load months:", err);
         setAllMonths([{ source_month: '202605', count: 0 }]);
-        setSelectedMonth('202605');
+        setSelectedMonth(dataMode === 'year' ? '2026_annual' : '202605');
       }
     };
     fetchMonths();
@@ -342,7 +343,11 @@ export default function DashboardPage() {
   const formatMonth = (m) => {
     if (!m) return '';
     if (m.endsWith('_annual')) {
-      return `${m.split('_')[0]} 完整年度`;
+      const year = m.split('_')[0];
+      if (year === '2026') {
+        return `${year} 年累計`;
+      }
+      return `${year} 完整年度`;
     }
     const y = m.substring(0, 4);
     const mm = m.substring(4, 6);

@@ -6,7 +6,11 @@ export default function Header({ totalCases, sourceMonth }) {
   const formatMonth = (m) => {
     if (!m) return '';
     if (m.endsWith('_annual')) {
-      return `${m.split('_')[0]} 完整年度`;
+      const year = m.split('_')[0];
+      if (year === '2026') {
+        return `${year} 年累計`;
+      }
+      return `${year} 完整年度`;
     }
     const y = m.substring(0, 4);
     const mm = m.substring(4, 6);
@@ -20,7 +24,7 @@ export default function Header({ totalCases, sourceMonth }) {
       <div className="brand-block">
         <div className="eyebrow">NATIONAL / REGIONAL PUBLIC SAFETY</div>
         <h1>地方治安主題統計與趨勢</h1>
-        <p className="subtitle">內政部警政署統計指標分析網頁模組</p>
+        <p className="subtitle">內政部受理案件統計數據指標分析</p>
       </div>
       <div className="status-group">
         <div className="status-dot"></div>
