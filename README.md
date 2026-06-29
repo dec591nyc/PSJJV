@@ -1,4 +1,4 @@
-# 台灣地方治安統計與資料完整度審計平台 (Taiwan Local Public Safety Statistics & Data Integrity Audit Platform)
+# 台灣地方治安統計數據分析平台 (Taiwan Local Public Safety Statistics & Data Integrity Audit Platform)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Next.js-14.2-black?style=for-the-badge&logo=next.js" alt="Next.js" />
