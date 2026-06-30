@@ -21,12 +21,13 @@ from etl import (
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/local/public_safety.sqlite"))
+    parser.add_argument("--sqlite", action="store_true", help="Force SQLite even when PUBLIC_SAFETY_DATABASE_URL is configured")
     parser.add_argument("--backfill", help="Start month for backfilling YYYYMM (e.g. 199301)")
     parser.add_argument("--month", help="Single Gregorian month to update YYYYMM")
     args = parser.parse_args()
     
     # Determine DB connection type and retrieve connection
-    conn, db_type = get_connection(args.db)
+    conn, db_type = get_connection(args.db, db_type="sqlite" if args.sqlite else None)
     if db_type == "postgres":
         print("Using PostgreSQL Database (Supabase)...")
     else:

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""Generate static JSON files and structured summaries in Supabase Database."""
+"""Generate structured summary reports in the configured database."""
 
 import os
 import sys
@@ -31,7 +31,29 @@ def latest_complete_month():
         month = 12
     return f"{year}{month:02d}"
 
+def parse_report_month(value: str) -> str:
+    if not re.fullmatch(r"\d{6}", value or ""):
+        raise argparse.ArgumentTypeError("month must use YYYYMM")
+    year = int(value[:4])
+    month = int(value[4:])
+    if year <= 1911 or not 1 <= month <= 12:
+        raise argparse.ArgumentTypeError("month must be a valid Gregorian month")
+    return value
+
+def parse_report_year(value: str) -> str:
+    if not re.fullmatch(r"\d{4}", value or ""):
+        raise argparse.ArgumentTypeError("year must use YYYY")
+    year = int(value)
+    if year <= 1911:
+        raise argparse.ArgumentTypeError("year must be a valid Gregorian year")
+    return value
+
 def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=False):
+    available_months = sorted(
+        str(m)
+        for m in available_months
+        if re.fullmatch(r"\d{6}", str(m or ""))
+    )
     metric_colors = load_metric_colors(conn, db_type)
     cursor = conn.cursor()
 
@@ -355,12 +377,62 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
         },
     }
 
+def fetch_available_months(cursor, db_type):
+    print("Generating months list...")
+    sql_months = """
+    SELECT source_month, SUM(raw_value) as count
+    FROM official_statistics
+    WHERE metric = ? AND geography = ? AND source_month <= ?
+    GROUP BY source_month
+    ORDER BY source_month ASC
+    """
+    if db_type == "postgres":
+        sql_months = sql_months.replace("?", "%s")
+    cursor.execute(sql_months, (TOTAL_METRIC, TOTAL_GEOGRAPHY, latest_complete_month()))
+    months_rows = [{"source_month": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+    if not months_rows:
+        return [{"source_month": "202606", "count": 1248}]
+    return months_rows
+
+def resolve_generation_targets(args, months_rows):
+    if not months_rows:
+        return [], []
+
+    available_months = [m["source_month"] for m in months_rows]
+
+    if args.full_refresh:
+        target_months = available_months
+    elif args.month:
+        target_months = [args.month]
+    else:
+        target_months = [available_months[-1]]
+
+    if args.year:
+        target_years = [args.year]
+    elif args.full_refresh:
+        target_years = sorted({m[:4] for m in available_months if m <= latest_complete_month()})
+    else:
+        target_years = sorted({m[:4] for m in target_months})
+
+    return target_months, target_years
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--db", type=Path, default=Path("data/local/public_safety.sqlite"))
+    parser.add_argument("--month", type=parse_report_month, help="Compile one monthly report YYYYMM and its annual report")
+    parser.add_argument("--year", type=parse_report_year, help="Compile one annual report YYYY")
+    parser.add_argument("--full-refresh", action="store_true", help="Recompute every available monthly and annual report")
+    parser.add_argument("--latest-only", action="store_true", help="Explicit default: compile only the latest available month and its annual report")
+    parser.add_argument("--sqlite", action="store_true", help="Force SQLite even when PUBLIC_SAFETY_DATABASE_URL is configured")
     args = parser.parse_args()
 
-    conn, db_type = get_connection(args.db)
+    if args.month and args.full_refresh:
+        parser.error("--month cannot be combined with --full-refresh")
+    if args.year and args.full_refresh:
+        parser.error("--year cannot be combined with --full-refresh")
+
+    conn, db_type = get_connection(args.db, db_type="sqlite" if args.sqlite else None)
     init_db(conn, db_type)
     cursor = conn.cursor()
 
@@ -368,6 +440,28 @@ def main():
         # Sync metric styles first
         metric_style_count = sync_metric_styles(conn, db_type)
         print(f"Metric styles synced: {metric_style_count}")
+
+        months_rows = fetch_available_months(cursor, db_type)
+        available_months = [m["source_month"] for m in months_rows]
+        target_months, target_years = resolve_generation_targets(args, months_rows)
+
+        print(f"Available months: {available_months[0]}..{available_months[-1]} ({len(available_months)} months)")
+        print(f"Monthly reports to compile: {target_months}")
+        print(f"Annual reports to compile: {target_years}")
+
+        for month in target_months:
+            print(f"\nProcessing month {month}...")
+            payload = calculate_summary(conn, db_type, month, available_months, is_annual=False)
+            save_summary_report(conn, db_type, f"official-summary_{month}", payload)
+
+        print("\nGenerating annual summaries...")
+        for year in target_years:
+            print(f"Generating annual summary for year {year}...")
+            payload = calculate_summary(conn, db_type, year, available_months, is_annual=True)
+            save_summary_report(conn, db_type, f"official-summary_{year}_annual", payload)
+
+        print("\nStructured data calculated and synchronized successfully.")
+        return
 
         # 1. Months list query
         print("Generating months list...")

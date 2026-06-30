@@ -64,4 +64,15 @@ CREATE TABLE IF NOT EXISTS crime_summary_reports (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS crime_summary_payload_cache (
+  cache_key TEXT PRIMARY KEY,
+  report_key TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(report_key) REFERENCES crime_summary_reports(report_key) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_crime_summary_payload_cache_report_key
+  ON crime_summary_payload_cache(report_key);
+
 

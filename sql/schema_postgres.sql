@@ -66,5 +66,15 @@ CREATE TABLE IF NOT EXISTS crime_summary_reports (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS crime_summary_payload_cache (
+  cache_key TEXT PRIMARY KEY,          -- e.g. 'official-summary:202604'
+  report_key TEXT NOT NULL REFERENCES crime_summary_reports(report_key) ON DELETE CASCADE,
+  payload JSONB NOT NULL,              -- complete precomputed API response, stored in DB only
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_crime_summary_payload_cache_report_key
+  ON crime_summary_payload_cache(report_key);
+
 
 

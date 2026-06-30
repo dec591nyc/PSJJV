@@ -75,6 +75,50 @@ def db_fetch_all(conn: Any, db_type: str, sql: str, params: tuple | list = ()) -
     cursor = db_execute(conn, db_type, sql, params)
     return cursor.fetchall()
 
+def ensure_schema_migrations(conn: Any, db_type: str) -> None:
+    """Apply lightweight additive migrations for existing local or hosted databases."""
+    if db_type == "postgres":
+        db_execute(
+            conn,
+            db_type,
+            """
+            CREATE TABLE IF NOT EXISTS crime_summary_payload_cache (
+              cache_key TEXT PRIMARY KEY,
+              report_key TEXT NOT NULL REFERENCES crime_summary_reports(report_key) ON DELETE CASCADE,
+              payload JSONB NOT NULL,
+              updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        db_execute(
+            conn,
+            db_type,
+            """
+            CREATE INDEX IF NOT EXISTS idx_crime_summary_payload_cache_report_key
+              ON crime_summary_payload_cache(report_key)
+            """
+        )
+        return
+
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS crime_summary_payload_cache (
+          cache_key TEXT PRIMARY KEY,
+          report_key TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY(report_key) REFERENCES crime_summary_reports(report_key) ON DELETE CASCADE
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_crime_summary_payload_cache_report_key
+          ON crime_summary_payload_cache(report_key)
+        """
+    )
+
 def init_db(conn: Any, db_type: str) -> None:
     """Initialize database tables using appropriate schema file, and seed categories."""
     schema_file = "schema_postgres.sql" if db_type == "postgres" else "schema_sqlite.sql"
@@ -91,6 +135,8 @@ def init_db(conn: Any, db_type: str) -> None:
         cursor.executescript(schema_path.read_text(encoding="utf-8"))
     else:
         cursor.execute(schema_path.read_text(encoding="utf-8"))
+
+    ensure_schema_migrations(conn, db_type)
         
     # Seed categories
     db_executemany(

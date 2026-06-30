@@ -27,7 +27,7 @@
 4. **離線開發 SQLite 備援模式 (Offline SQLite Fallback)**：
    若無設定 Supabase 連線（系統會自動讀取專案根目錄的 `.env` 檔案以取得連線字串，若無此檔則自動降級），系統會自動切換至本地 `data/local/public_safety.sqlite` 中進行資料庫操作與編譯測試。
 5. **無本機儲存限制雲端模式 (Zero-Persistence Cloud Mode)**：
-   因應 Serverless、Docker、n8n 等無寫入權限或無狀態託管環境，系統支援全記憶體運作與 direct DB sync。資料由 Python ETL pipeline 直接計算並推送到雲端 Supabase 的 `crime_summary_reports` 資料表，本機無須留存任何 JSON 檔案，保持 Git 倉庫乾淨輕量。
+   因應 Serverless、Docker、n8n 等無寫入權限或無狀態託管環境，系統支援全記憶體運作與 direct DB sync。資料由 Python ETL pipeline 直接計算並推送到雲端 Supabase 的 `crime_summary_reports` 與 `crime_summary_payload_cache` 資料表，本機無須留存任何 JSON 檔案，保持 Git 倉庫乾淨輕量。
 
 ---
 
@@ -45,7 +45,7 @@ flowchart TD
         A -->|CSV 數據| B
         B -->|官方原始統計數據| D["(Supabase 雲端資料庫 / SQLite)"]
         D -->|拉取並計算彙整指標| C
-        C -->|直接上傳 crime_summary_reports| D
+        C -->|上傳 summary 與 payload cache| D
     end
 
     subgraph "前端儀表板 (Next.js Web App)"
@@ -100,7 +100,7 @@ pip install psycopg2-binary requests
 py scripts/run_daily_update.py
 
 # 2. 自動編譯指標並直接上傳至 Supabase
-py scripts/generate_static_json.py
+py scripts/generate_static_json.py --latest-only
 ```
 
 ### 3. 本地啟動前端開發服務
@@ -117,7 +117,7 @@ npm run dev
 2. **手動歷史回填 (One-time Backfill)**：由於新部署的 Supabase 資料庫是空表，網頁可能無法顯示過去年份的下拉選單與年度比較。您可透過 n8n 執行一次性回填：
    * 在 n8n 中將 `Execute Command` 節點的指令暫時修改為：
      ```bash
-     cd /home/node/public-safety-dashboard && python3 scripts/run_daily_update.py --backfill 201801 && python3 scripts/generate_static_json.py
+     cd /home/node/public-safety-dashboard && python3 scripts/run_daily_update.py --backfill 201801 && python3 scripts/generate_static_json.py --full-refresh
      ```
      *(可將 `201801` 替換為您需要的起始年份月份)*
    * 點擊 **Execute Node** 執行一次，即可完整下載並計算歷史統計數據寫入 Supabase。

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""ETL Load Phase: Saving to SQLite/PostgreSQL relational tables and exporting static JSON backups."""
+"""ETL Load Phase: Saving to SQLite/PostgreSQL relational tables."""
 
 import os
 import json
@@ -83,10 +83,25 @@ def save_summary_report(conn: Any, db_type: str, key: str, payload: dict) -> Non
                 wrap_json(payload.get("quality", {})),
                 wrap_json(payload.get("summary", {})),
             ))
+
+            sql_payload_cache = """
+            INSERT INTO crime_summary_payload_cache (cache_key, report_key, payload, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT (cache_key) DO UPDATE SET
+              report_key = EXCLUDED.report_key,
+              payload = EXCLUDED.payload,
+              updated_at = CURRENT_TIMESTAMP
+            """
+            if db_type == "postgres":
+                sql_payload_cache = sql_payload_cache.replace("?", "%s")
+
+            cursor.execute(sql_payload_cache, (
+                f"official-summary:{report_key}",
+                report_key,
+                wrap_json(payload),
+            ))
             conn.commit()
-            print(f"Database ({db_type}): Synced {report_type} report '{report_key}' to crime_summary_reports.")
+            print(f"Database ({db_type}): Synced {report_type} report '{report_key}' and API payload cache.")
         except Exception as e:
             conn.rollback()
             print(f"Error syncing report '{suffix}' to crime_summary_reports: {e}")
-
-
