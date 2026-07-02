@@ -35,7 +35,7 @@
 
 ---
 
-## 🏗️ 系統架構與資料流 (Architecture & Data Flow)
+## 🏗️ 系統架構與資料流
 
 ```mermaid
 flowchart TD
