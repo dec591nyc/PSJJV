@@ -39,26 +39,29 @@
 
 ```mermaid
 flowchart TD
-    subgraph "數據源 Data Source"
-        A[內政部統計月報<br/>刑事案件資料集 9603]
+    subgraph "數據源 (Data Source)"
+        A[內政部統計網\n刑事統計數據集 9603]
     end
 
-    subgraph "自動化資料處理 n8n / Python ETL" N[n8n Scheduler<br/>每月自動觸發]
-        B[run_daily_update.py<br/>下載、清洗、校對、寫入 DB]
-        C[sync_summary_reports.py<br/>產生月報、年報、YoY 與圖表快取]
-        D[(Supabase PostgreSQL<br/>或 SQLite Fallback)]
-        N --> B
-        A -->|CSV / Open Data| B
-        B -->|官方統計資料| D
-        D -->|讀取統計資料| C
-        C -->|寫入 summary reports / payload cache| D
+    subgraph "自動化管線 (n8n / Python)"
+        B["run_daily_update.py\n(下載、清洗、寫入 Supabase)"]
+        C["generate_static_json.py\n(臨時 SQLite 鏡像計算 & 編譯)"]
+        A -->|CSV 數據| B
+        B -->|更新 Postgres 表| D["(Supabase 雲端資料庫)"]
+        D -->|拉取計算| C
+        C -->|自動上傳 JSONB| D
+    end
+	
+   subgraph "前端儀表板 (Next.js App)"
+        F[Next.js API 路由] -->|1. 優先查詢 JSONB| D
+        F -->|2. 資料庫不可用時自動降級| G[public/static_api/*.json]
+        G --> H[React 前端 / Recharts 渲染]
+        D -->|提供最新資料| H
     end
 
-    subgraph "前端儀表板 Next.js Web App"
-        F[Next.js API Routes]
-        H[React Dashboard<br/>Recharts 視覺化]
-        F -->|查詢統計資料| D
-        H -->|呼叫 API| F
+    subgraph "純靜態版 (GitHub Pages SPA)"
+        C -->|非雲端模式時複製| I[docs/static_api/*.json]
+        J[Vanilla JS app.js] -->|讀取| I
     end
 ```
 
