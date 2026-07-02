@@ -43,25 +43,18 @@ flowchart TD
         A[內政部統計網\n刑事統計數據集 9603]
     end
 
-    subgraph "自動化管線 (n8n / Python)"
-        B["run_daily_update.py\n(下載、清洗、寫入 Supabase)"]
-        C["generate_static_json.py\n(臨時 SQLite 鏡像計算 & 編譯)"]
+    subgraph "自動化數據流水線 (n8n / Python ETL)"
+        B["run_daily_update.py\n(下載、清洗、寫入 DB)"]
+        C["sync_summary_reports.py\n(數據轉型、計算指標與主題包)"]
         A -->|CSV 數據| B
-        B -->|更新 Postgres 表| D["(Supabase 雲端資料庫)"]
-        D -->|拉取計算| C
-        C -->|自動上傳 JSONB| D
-    end
-	
-   subgraph "前端儀表板 (Next.js App)"
-        F[Next.js API 路由] -->|1. 優先查詢 JSONB| D
-        F -->|2. 資料庫不可用時自動降級| G[public/static_api/*.json]
-        G --> H[React 前端 / Recharts 渲染]
-        D -->|提供最新資料| H
+        B -->|官方原始統計數據| D["(Supabase 雲端資料庫 / SQLite)"]
+        D -->|拉取並計算彙整指標| C
+        C -->|上傳 summary 與 payload cache| D
     end
 
-    subgraph "純靜態版 (GitHub Pages SPA)"
-        C -->|非雲端模式時複製| I[docs/static_api/*.json]
-        J[Vanilla JS app.js] -->|讀取| I
+    subgraph "前端儀表板 (Next.js Web App)"
+        F[Next.js API 路由] -->|查詢結構化指標| D
+        D -->|提供最新數據| H[React 前端 / Recharts 渲染]
     end
 ```
 
