@@ -594,9 +594,10 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
         cursor.execute(sql_rows, (query_param,))
         current_rows = get_row_dict_list(cursor.fetchall(), cursor)
 
-    stats_lookup = {(r["geography"], r["metric"]): r["raw_value"] for r in current_rows}
+    stats_lookup = {(r["geography"], r["metric"]): int(r["raw_value"] or 0) for r in current_rows}
     geographies = {r["geography"] for r in current_rows}
-    total = stats_lookup.get((TOTAL_GEOGRAPHY, TOTAL_METRIC), 0)
+    total = int(stats_lookup.get((TOTAL_GEOGRAPHY, TOTAL_METRIC), 0) or 0)
+
 
     # YoY Comparisons setup
     prev_month = None
@@ -682,7 +683,7 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
                 sql_prev_cat = sql_prev_cat.replace("?", "%s")
             cursor.execute(sql_prev_cat, (prev_month, TOTAL_GEOGRAPHY) + tuple(source_labels))
             prev_row = cursor.fetchone()
-            prev_count = prev_row[0] if prev_row and prev_row[0] else 0
+            prev_count = int(prev_row[0] or 0) if prev_row and prev_row[0] is not None else 0
         elif is_annual:
             markers = ",".join("?" for _ in source_labels)
             sql_prev_cat = f"SELECT SUM(raw_value) FROM official_statistics WHERE source_month LIKE ? AND geography = ? AND metric IN ({markers})"
@@ -690,7 +691,8 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
                 sql_prev_cat = sql_prev_cat.replace("?", "%s")
             cursor.execute(sql_prev_cat, (f"{prev_year}%", TOTAL_GEOGRAPHY) + tuple(source_labels))
             prev_row = cursor.fetchone()
-            prev_count = prev_row[0] if prev_row and prev_row[0] else 0
+            prev_count = int(prev_row[0] or 0) if prev_row and prev_row[0] is not None else 0
+
 
         category_counts.append({
             "category": key,
@@ -809,27 +811,32 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
     if db_type == "postgres":
         sql_quality_raw = sql_quality_raw.replace("?", "%s")
     cursor.execute(sql_quality_raw, (query_param,))
-    raw_rows_count = cursor.fetchone()[0] or 0
+    raw_res = cursor.fetchone()
+    raw_rows_count = int(raw_res[0] or 0) if raw_res and raw_res[0] is not None else 0
 
     sql_quality_metrics = f"SELECT COUNT(DISTINCT metric) FROM official_statistics WHERE source_month {op_operator} ?"
     if db_type == "postgres":
         sql_quality_metrics = sql_quality_metrics.replace("?", "%s")
     cursor.execute(sql_quality_metrics, (query_param,))
-    metric_count_val = cursor.fetchone()[0] or 0
+    metrics_res = cursor.fetchone()
+    metric_count_val = int(metrics_res[0] or 0) if metrics_res and metrics_res[0] is not None else 0
 
     sql_quality_cases = f"SELECT COUNT(DISTINCT metric) FROM official_statistics WHERE source_month {op_operator} ? AND metric != ?"
     if db_type == "postgres":
         sql_quality_cases = sql_quality_cases.replace("?", "%s")
     cursor.execute(sql_quality_cases, (query_param, TOTAL_METRIC))
-    case_metric_count = cursor.fetchone()[0] or 0
+    cases_res = cursor.fetchone()
+    case_metric_count = int(cases_res[0] or 0) if cases_res and cases_res[0] is not None else 0
 
     sql_quality_nat = f"SELECT SUM(raw_value) FROM official_statistics WHERE source_month {op_operator} ? AND geography = ? AND metric != ?"
     if db_type == "postgres":
         sql_quality_nat = sql_quality_nat.replace("?", "%s")
     cursor.execute(sql_quality_nat, (query_param, TOTAL_GEOGRAPHY, TOTAL_METRIC))
-    national_metric_sum = cursor.fetchone()[0] or 0
+    nat_res = cursor.fetchone()
+    national_metric_sum = int(nat_res[0] or 0) if nat_res and nat_res[0] is not None else 0
 
     total_reconciliation_delta = int(total or 0) - int(national_metric_sum or 0)
+
 
     leading_topics = [
         item for item in sorted(topic_drilldowns, key=lambda item: item["total"], reverse=True)

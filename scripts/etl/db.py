@@ -28,6 +28,50 @@ def load_env_file():
 
 load_env_file()
 
+class TursoRow:
+    def __init__(self, cols: list, vals: list):
+        self._cols = cols
+        self._vals = vals
+        self._col_map = {col.lower(): idx for idx, col in enumerate(cols)}
+
+    def __getitem__(self, item):
+        if isinstance(item, int):
+            return self._vals[item]
+        if isinstance(item, str):
+            idx = self._col_map.get(item.lower())
+            if idx is not None:
+                return self._vals[idx]
+            # Try raw column match
+            for c_idx, c_name in enumerate(self._cols):
+                if c_name == item:
+                    return self._vals[c_idx]
+            raise KeyError(item)
+        raise TypeError(f"Invalid index type {type(item)}")
+
+    def __len__(self):
+        return len(self._vals)
+
+    def __iter__(self):
+        return iter(self._vals)
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except (KeyError, IndexError):
+            return default
+
+    def keys(self):
+        return self._cols
+
+    def values(self):
+        return self._vals
+
+    def items(self):
+        return zip(self._cols, self._vals)
+
+    def __repr__(self):
+        return f"TursoRow({dict(self.items())})"
+
 class TursoCursor:
     def __init__(self, conn):
         self.conn = conn
@@ -58,6 +102,17 @@ class TursoCursor:
         self._row_idx = len(self._rows)
         return rows
 
+def format_turso_arg(p: Any) -> dict:
+    if p is None:
+        return {"type": "null"}
+    if isinstance(p, bool):
+        return {"type": "integer", "value": "1" if p else "0"}
+    if isinstance(p, int):
+        return {"type": "integer", "value": str(p)}
+    if isinstance(p, float):
+        return {"type": "float", "value": p}
+    return {"type": "text", "value": str(p)}
+
 class TursoConnection:
     def __init__(self, url: str, auth_token: str = None):
         clean_url = url.replace("libsql://", "https://")
@@ -83,6 +138,7 @@ class TursoConnection:
     def _post(self, requests_payload):
         import json
         import urllib.request
+        import urllib.error
         headers = {
             "Content-Type": "application/json"
         }
@@ -93,26 +149,24 @@ class TursoConnection:
             data=json.dumps({"requests": requests_payload}).encode("utf-8"),
             headers=headers
         )
-        with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as err:
+            err_body = err.read().decode("utf-8", errors="ignore")
+            print(f"Turso API Error ({err.code}): {err_body}", file=sys.stderr)
+            raise RuntimeError(f"Turso API Error ({err.code}): {err_body}") from err
 
     def execute_http(self, sql: str, params: tuple | list = ()):
-        args = [
-            {"type": "text" if isinstance(p, str) else "integer" if isinstance(p, int) else "float" if isinstance(p, float) else "null",
-             "value": str(p) if p is not None else None}
-            for p in params
-        ]
+        args = [format_turso_arg(p) for p in params]
         payload = [{"type": "execute", "stmt": {"sql": sql, "args": args}}]
         res = self._post(payload)
         response_obj = res.get("results", [{}])[0].get("response", {}).get("result", {})
         cols = [c["name"] for c in response_obj.get("cols", [])]
         rows = []
         for r in response_obj.get("rows", []):
-            row_dict = {}
-            for col_idx, col_name in enumerate(cols):
-                val_obj = r[col_idx]
-                row_dict[col_name] = val_obj.get("value")
-            rows.append(row_dict)
+            vals = [val_obj.get("value") for val_obj in r]
+            rows.append(TursoRow(cols, vals))
         desc = [(c, None, None, None, None, None, None) for c in cols]
         return rows, desc
 
@@ -121,13 +175,11 @@ class TursoConnection:
             chunk = params_list[i:i+100]
             requests = []
             for params in chunk:
-                args = [
-                    {"type": "text" if isinstance(p, str) else "integer" if isinstance(p, int) else "float" if isinstance(p, float) else "null",
-                     "value": str(p) if p is not None else None}
-                    for p in params
-                ]
+                args = [format_turso_arg(p) for p in params]
                 requests.append({"type": "execute", "stmt": {"sql": sql, "args": args}})
             self._post(requests)
+
+
 
 def get_connection(db_path: Path | str = None, db_type: str = None) -> tuple[Any, str]:
     """Retrieve connection to SQLite, Turso LibSQL, or Postgres."""
@@ -215,6 +267,30 @@ def ensure_schema_migrations(conn: Any, db_type: str) -> None:
         return
 
     cursor = conn.cursor()
+    if isinstance(conn, TursoConnection):
+        try:
+            cursor.execute("ALTER TABLE crime_summary_reports ADD COLUMN annual_comparison TEXT NOT NULL DEFAULT '{}'")
+        except Exception:
+            pass
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crime_summary_payload_cache (
+              cache_key TEXT PRIMARY KEY,
+              report_key TEXT NOT NULL,
+              payload TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY(report_key) REFERENCES crime_summary_reports(report_key) ON DELETE CASCADE
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_crime_summary_payload_cache_report_key
+              ON crime_summary_payload_cache(report_key)
+            """
+        )
+        return
+
     cursor.execute("PRAGMA table_info(crime_summary_reports)")
     existing_columns = {row[1] for row in cursor.fetchall()}
     if "annual_comparison" not in existing_columns:
@@ -248,7 +324,14 @@ def init_db(conn: Any, db_type: str) -> None:
         sys.exit(1)
     
     cursor = conn.cursor()
-    if db_type == "sqlite":
+    if isinstance(conn, TursoConnection):
+        statements = [s.strip() for s in schema_path.read_text(encoding="utf-8").split(";") if s.strip()]
+        for stmt in statements:
+            try:
+                cursor.execute(stmt)
+            except Exception:
+                pass
+    elif db_type == "sqlite":
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
         cursor.execute("PRAGMA foreign_keys=ON")
@@ -280,6 +363,7 @@ def init_db(conn: Any, db_type: str) -> None:
     )
     conn.commit()
     print(f"Database initialized and seeded ({db_type}).")
+
 
 def is_hex_color(value: str | None) -> bool:
     import re

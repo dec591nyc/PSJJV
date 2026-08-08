@@ -14,17 +14,28 @@ from .config import (
 )
 from .db import db_fetch_all, metric_color
 
-def percent_change(current: float | int | None, previous: float | int | None) -> float | None:
-    if previous in {None, 0}:
+def percent_change(current: Any, previous: Any) -> float | None:
+    if previous is None or current is None:
         return None
-    if current is None:
+    try:
+        prev_val = float(previous)
+        curr_val = float(current)
+    except (ValueError, TypeError):
         return None
-    return round((current - previous) / previous * 100, 2)
+    if prev_val == 0:
+        return None
+    return round((curr_val - prev_val) / prev_val * 100, 2)
 
-def percent_of(part: float | int, whole: float | int) -> float:
-    if not whole:
+def percent_of(part: Any, whole: Any) -> float:
+    try:
+        p = float(part)
+        w = float(whole)
+    except (ValueError, TypeError):
         return 0.0
-    return round(part / whole * 100, 2)
+    if not w:
+        return 0.0
+    return round(p / w * 100, 2)
+
 
 def row_to_dict(row: Any, cursor_desc: list = None) -> dict:
     """Helper to convert sqlite3.Row, dict, or psycopg2 tuple to standard dict."""
