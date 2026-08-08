@@ -5,6 +5,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+// In-memory server-side cache for high performance
+const memoryCache = new Map();
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 const safeJsonParse = (val, fallback = null) => {
   if (!val) return fallback;
   if (typeof val === 'object') return val;
@@ -20,6 +24,12 @@ async function getSummaryReport(reportKey) {
     return null;
   }
 
+  // Check in-memory cache first
+  const cached = memoryCache.get(reportKey);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+
   try {
     // 1. Try reading from pre-computed payload cache
     const cacheRs = await client.execute({
@@ -29,7 +39,11 @@ async function getSummaryReport(reportKey) {
 
     if (cacheRs.rows?.length > 0) {
       const rawPayload = cacheRs.rows[0].payload || cacheRs.rows[0][0];
-      return safeJsonParse(rawPayload);
+      const parsed = safeJsonParse(rawPayload);
+      if (parsed) {
+        memoryCache.set(reportKey, { data: parsed, timestamp: Date.now() });
+      }
+      return parsed;
     }
 
     // 2. Fallback: Query crime_summary_reports directly
@@ -68,7 +82,7 @@ async function getSummaryReport(reportKey) {
       count: Number(r.count ?? r[1] ?? 0),
     }));
 
-    return {
+    const result = {
       source_month: row.report_key,
       source_url: row.source_url,
       dataset_id: row.dataset_id,
@@ -87,6 +101,9 @@ async function getSummaryReport(reportKey) {
       quality: safeJsonParse(row.quality, {}),
       summary: safeJsonParse(row.summary, {}),
     };
+
+    memoryCache.set(reportKey, { data: result, timestamp: Date.now() });
+    return result;
   } catch (err) {
     console.error(`Turso query failed for ${reportKey}:`, err);
     return null;
@@ -106,7 +123,7 @@ export async function GET(request) {
 
     return NextResponse.json(payload, {
       headers: {
-        'Cache-Control': 'no-store, max-age=0',
+        'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
       },
     });
   } catch (e) {

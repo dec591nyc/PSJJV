@@ -93,44 +93,118 @@ def topic_definitions(stats_lookup: dict) -> list[dict]:
         },
     ]
 
-def build_topic_yoy_lookup(conn: Any, db_type: str, selected_month: str, topics: list[dict]) -> dict:
-    if not re.fullmatch(r"\d{6}", selected_month or ""):
+def build_topic_yoy_lookup(conn: Any, db_type: str, selected_month: str, topics: list[dict], available_months: list[str] = None) -> dict:
+    if not selected_month:
         return {}
-    
-    previous_month = f"{int(selected_month[:4]) - 1}{selected_month[4:]}"
+
+    cursor = conn.cursor()
     lookup = {}
 
-    for topic in topics:
-        if topic.get("is_total_scope"):
-            sql = """
-            SELECT geography, raw_value AS total
-            FROM official_statistics
-            WHERE source_month = ? AND metric = ?
-            """
-            cursor = conn.cursor()
-            if db_type == "postgres":
-                sql = sql.replace("?", "%s")
-            cursor.execute(sql, (previous_month, TOTAL_METRIC))
-            rows = get_row_dict_list(cursor.fetchall(), cursor)
-        else:
-            metrics = tuple(topic.get("metrics") or ())
-            if not metrics:
-                continue
-            markers = ",".join("?" for _ in metrics)
-            sql = f"""
-            SELECT geography, SUM(raw_value) AS total
-            FROM official_statistics
-            WHERE source_month = ? AND metric IN ({markers})
-            GROUP BY geography
-            """
-            cursor = conn.cursor()
-            if db_type == "postgres":
-                sql = sql.replace("?", "%s")
-            cursor.execute(sql, (previous_month,) + metrics)
-            rows = get_row_dict_list(cursor.fetchall(), cursor)
+    # Check if annual mode (e.g. 2026_annual)
+    if selected_month.endswith("_annual"):
+        current_year = int(selected_month.split("_")[0])
+        previous_year = current_year - 1
 
-        for row in rows:
-            lookup[(topic["id"], row["geography"])] = int(row["total"] or 0)
+        # Determine which months are available in the current year
+        if available_months:
+            curr_months = [m for m in available_months if m.startswith(str(current_year))]
+            month_nums = [m[4:] for m in curr_months]
+            prev_months = [f"{previous_year}{m}" for m in month_nums]
+        else:
+            prev_months = [f"{previous_year}%"]
+
+        for topic in topics:
+            if topic.get("is_total_scope"):
+                if available_months and prev_months:
+                    markers = ",".join("?" for _ in prev_months)
+                    sql = f"""
+                    SELECT geography, SUM(raw_value) AS total
+                    FROM official_statistics
+                    WHERE source_month IN ({markers}) AND metric = ?
+                    GROUP BY geography
+                    """
+                    if db_type == "postgres":
+                        sql = sql.replace("?", "%s")
+                    cursor.execute(sql, tuple(prev_months) + (TOTAL_METRIC,))
+                else:
+                    sql = """
+                    SELECT geography, SUM(raw_value) AS total
+                    FROM official_statistics
+                    WHERE source_month LIKE ? AND metric = ?
+                    GROUP BY geography
+                    """
+                    if db_type == "postgres":
+                        sql = sql.replace("?", "%s")
+                    cursor.execute(sql, (f"{previous_year}%", TOTAL_METRIC))
+                rows = get_row_dict_list(cursor.fetchall(), cursor)
+            else:
+                metrics = tuple(topic.get("metrics") or ())
+                if not metrics:
+                    continue
+                metric_markers = ",".join("?" for _ in metrics)
+
+                if available_months and prev_months:
+                    month_markers = ",".join("?" for _ in prev_months)
+                    sql = f"""
+                    SELECT geography, SUM(raw_value) AS total
+                    FROM official_statistics
+                    WHERE source_month IN ({month_markers}) AND metric IN ({metric_markers})
+                    GROUP BY geography
+                    """
+                    if db_type == "postgres":
+                        sql = sql.replace("?", "%s")
+                    cursor.execute(sql, tuple(prev_months) + metrics)
+                else:
+                    sql = f"""
+                    SELECT geography, SUM(raw_value) AS total
+                    FROM official_statistics
+                    WHERE source_month LIKE ? AND metric IN ({metric_markers})
+                    GROUP BY geography
+                    """
+                    if db_type == "postgres":
+                        sql = sql.replace("?", "%s")
+                    cursor.execute(sql, (f"{previous_year}%",) + metrics)
+                rows = get_row_dict_list(cursor.fetchall(), cursor)
+
+            for row in rows:
+                lookup[(topic["id"], row["geography"])] = int(row["total"] or 0)
+
+        return lookup
+
+    # Monthly mode (e.g. 202605 -> 202505)
+    if re.fullmatch(r"\d{6}", selected_month):
+        previous_month = f"{int(selected_month[:4]) - 1}{selected_month[4:]}"
+        for topic in topics:
+            if topic.get("is_total_scope"):
+                sql = """
+                SELECT geography, raw_value AS total
+                FROM official_statistics
+                WHERE source_month = ? AND metric = ?
+                """
+                if db_type == "postgres":
+                    sql = sql.replace("?", "%s")
+                cursor.execute(sql, (previous_month, TOTAL_METRIC))
+                rows = get_row_dict_list(cursor.fetchall(), cursor)
+            else:
+                metrics = tuple(topic.get("metrics") or ())
+                if not metrics:
+                    continue
+                markers = ",".join("?" for _ in metrics)
+                sql = f"""
+                SELECT geography, SUM(raw_value) AS total
+                FROM official_statistics
+                WHERE source_month = ? AND metric IN ({markers})
+                GROUP BY geography
+                """
+                if db_type == "postgres":
+                    sql = sql.replace("?", "%s")
+                cursor.execute(sql, (previous_month,) + metrics)
+                rows = get_row_dict_list(cursor.fetchall(), cursor)
+
+            for row in rows:
+                lookup[(topic["id"], row["geography"])] = int(row["total"] or 0)
+
+        return lookup
 
     return lookup
 
@@ -352,8 +426,14 @@ def build_ai_insight(monthly_counts: list[dict], topic_drilldowns: list[dict]) -
     }
 
 def build_annual_comparison(conn: Any, db_type: str, months: list[str], selected_month: str, metric_colors: dict[str, str]) -> dict:
-    selected_year = int(selected_month[:4])
-    selected_month_num = int(selected_month[4:])
+    if selected_month.endswith("_annual"):
+        selected_year = int(selected_month.split("_")[0])
+        curr_months = [int(m[4:]) for m in months if m.startswith(str(selected_year)) and re.fullmatch(r"\d{6}", m)]
+        selected_month_num = max(curr_months) if curr_months else 12
+    else:
+        selected_year = int(selected_month[:4])
+        selected_month_num = int(selected_month[4:])
+
     years = sorted({int(m[:4]) for m in months if re.fullmatch(r"\d{6}", m)})
     years = [y for y in years if y <= selected_year][-8:]
 

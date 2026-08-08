@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import ActiveUsersBadge from './ActiveUsersBadge';
 
 export default function Header({ totalCases, sourceMonth }) {
   const formatMonth = (m) => {
@@ -27,8 +28,12 @@ export default function Header({ totalCases, sourceMonth }) {
         <p className="subtitle">內政部受理案件統計數據指標分析</p>
       </div>
       <div className="status-group">
-        <div className="status-dot"></div>
-        <span>與官方 API 同步完成</span>
+        <ActiveUsersBadge />
+        <div className="status-divider"></div>
+        <div className="sync-status">
+          <div className="status-dot"></div>
+          <span>官方同步完成</span>
+        </div>
         <div className="status-divider"></div>
         <span id="header-record-count">
           {sourceMonth ? `${formatMonth(sourceMonth)} · ${formattedCases} 件` : '載入中'}

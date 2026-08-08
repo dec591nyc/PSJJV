@@ -25,10 +25,22 @@
    本平台使用內政部統計月報中的刑事案件開放資料集。相較於非結構化新聞或網路聲量，官方受（處）理刑事統計具有長期一致性與可回溯性，更適合作為趨勢比較與治安研判的基礎。
 2. **內建數據完整性校對機制（Audit & Checksums）**：
    政府開放資料在實務上偶有欄位格式變動、月份資料未齊或縣市加總與全國總計不一致等問題。本專案在 ETL 流程中加入自動加總檢查，確保「各縣市加總」等於「全國總計」；一旦出現差額會自動發出警報，防止未經確認的錯誤數據直接渲染至前端。
-3. **Turso 雲端分散式 SQLite（0 JSON 垃圾檔案、0 維護負擔）**：
+3. **時間窗口嚴格對齊原則（Period-to-Date Baseline Alignment）**：
+   年度累計（Annual PTD）計算與去年同期（YoY）對比時，嚴格對齊相同累積月數（如本期前 6 個月對齊去年前 6 個月），杜絕拿 6 個月累計除以 12 個月全年度（導致負五十幾趴）或除以單月（導致暴漲四百多趴）的時間錯置錯誤。
+4. **Turso 雲端分散式 SQLite（0 JSON 垃圾檔案、0 維護負擔）**：
    捨棄易因閒置被刪除的外部資料庫或龐雜的本機靜態 JSON 檔案，全面採用 **Turso（基於 LibSQL 的分散式 SQLite）**。前後端直接透過 SQL 查詢資料，享受原生 SQLite 輕量優勢與 9GB 免費大額度。
-4. **GitHub Actions 雲端全自動排程（地端關機無痛運行）**：
+5. **GitHub Actions 雲端全自動排程（地端關機無痛運行）**：
    每月 25 日凌晨 03:00 自動在 GitHub 雲端啟動 Ubuntu 虛擬機執行 Python ETL 下載最新月報、更新 Turso 資料庫。**開發者個人電腦 24 小時關機亦能穩定自動更新**。
+6. **極速載入與三層快取架構（Zero-Waterfall & Multi-tier Cache）**：
+   - **並行發送**：首頁載入時同步平行抓取月份清單與彙整報表，消除請求串聯瀑布流。
+   - **前端記憶體快取**：瀏覽過的月份立即存入 Client-Side Map 快取，月/年維度切換達到 0ms 秒開。
+   - **Node.js 記憶體快取 + HTTP Cache-Control**：API 端具備伺服器記憶體快取與邊緣快取標頭，重複造訪即刻秒回。
+7. **LLM 作為後端語義數據 API（Semantic Data & Intelligence API）**：
+   - 本平台將 LLM 定義為「**後端語義數據 API**」而非單純的對話機器人。輸入官方結構化數據，輸出包含風險等級、歸因文本與行動建議的結構化 JSON Payload。
+   - **優先層**：Google Gemini Flash API（0.5 秒高速推論）。
+   - **備援層**：Ollama 本地離線模型（`llama3.2`, `qwen2.5`, `taiwan-llm`，零 API 費用、數據隱私保障）。
+   - **保底層**：內建規則統計引擎（100% 穩定零白屏）。
+   - 支援「🔍 警政情報視角」、「🛡️ 民生防範觀點」與「📊 統計歸因分析」三大角色即時運算。
 
 ---
 
@@ -50,9 +62,9 @@ flowchart TD
         C -->|寫入彙整報表與 Payload 快取| DB
     end
 
-    subgraph "前端儀表板 (Vercel / Next.js)"
-        DB -->|Edge SQL 查詢| V[Next.js API 路由]
-        V -->|高響應渲染| UI[React 前端 / Recharts 視覺化]
+    subgraph "前端極速載入架構 (Next.js / Vercel)"
+        DB -->|SQL 主鍵高速查詢| V["Next.js API 路由\n(In-Memory Cache & S-MaxAge)"]
+        V -->|平行傳輸| UI["React 前端 (Client Cache Map)\n(消除瀑布流 / 0ms 秒切)"]
     end
 ```
 
@@ -86,6 +98,33 @@ flowchart TD
 
 ---
 
+## 🔐 環境變數分類原則與整合架構 (Environment Configuration)
+
+為了確保全端專案（Python ETL 數據流水線 ＋ Next.js 前端 API）的一致性與可維護性，本專案採用**「四象限職責分離規範」**。
+
+### 📁 目錄位置與生效原則
+- **根目錄 `.env`（全局主檔）**：供 Python 資料管線、資料庫排程與 GitHub Actions 讀取。
+- **`web/.env`（前端設定）**：供 Next.js API Routes、Edge Runtime 與 SSR 前端讀取。
+- 專案已同步提供範本檔 [`.env.example`](file:///c:/Users/zifue/Documents/AgenticAI/Public-Safety-Integrity-Analytics/.env.example) 與 [`web/.env.example`](file:///c:/Users/zifue/Documents/AgenticAI/Public-Safety-Integrity-Analytics/web/.env.example)。
+
+### 🧩 四象限變數分類清單
+
+| 分類象限 | 變數名稱 | 預設值 / 格式 | 說明與作用 |
+| :--- | :--- | :--- | :--- |
+| **🗄️ 1. 資料庫與儲存** | `TURSO_DATABASE_URL` | `libsql://[db].turso.io` | **必填**。Turso 雲端分散式 SQLite 端點。 |
+| | `TURSO_AUTH_TOKEN` | `eyJhbGci...` | **必填**。Turso JWT 存取金鑰。 |
+| | `PUBLIC_SAFETY_DATABASE_URL` | `postgresql://...` | （選用）若擴充至 PostgreSQL / Supabase 時填寫。 |
+| **🧠 2. AI 智慧情報引擎** | `GEMINI_API_KEY` | `AIzaSy...` | **優先**。Google Gemini Flash API Key，0.5秒極速情報推論。 |
+| | `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini Flash 模型版本。 |
+| | `OLLAMA_BASE_URL` | `http://localhost:11434` | **備援**。本地 Ollama 離線模型服務端點。 |
+| | `OLLAMA_MODEL` | `llama3.2` | 本地運行之 LLM 模型名稱（如 `qwen2.5`, `taiwan-llm`）。 |
+| **🌐 3. 前端與快取** | `NEXT_PUBLIC_APP_TITLE` | `台灣地方治安統計...` | 網頁主標題。 |
+| | `CACHE_MAX_AGE` | `300` | HTTP API 伺服器快取秒數（5分鐘）。 |
+| | `CACHE_STALE_WHILE_REVALIDATE`| `86400` | S-MaxAge 後台重驗證秒數（24小時）。 |
+| **⚙️ 4. 數據流水線** | `MOI_DATASET_ID` | `9603` | 內政部警政署刑事月報資料集編號。 |
+
+---
+
 ## 🚀 部署與本地開發
 
 ### 1. 建立免費 Turso 資料庫（1 分鐘快速完成）
@@ -97,12 +136,7 @@ flowchart TD
    ```
 3. 在 SQL Editor 執行 `sql/schema_sqlite.sql` 建立資料表結構。
 
-### 2. 環境變數配置
-將上述變數填入 `.env`（本地開發）、GitHub Secrets（雲端排程）與 Vercel（前端託管）：
-* `TURSO_DATABASE_URL`
-* `TURSO_AUTH_TOKEN`
-
-### 3. 本地執行資料庫更新與編譯
+### 2. 本地執行資料庫更新與編譯
 ```bash
 # 1. 下載最新月份官方資料並寫入 Turso
 python scripts/run_daily_update.py --skip-existing --min-release-day 8
@@ -111,7 +145,7 @@ python scripts/run_daily_update.py --skip-existing --min-release-day 8
 python scripts/sync_summary_reports.py --latest-only
 ```
 
-### 4. 本地啟動前端開發服務
+### 3. 本地啟動前端開發服務
 ```bash
 cd web
 npm install

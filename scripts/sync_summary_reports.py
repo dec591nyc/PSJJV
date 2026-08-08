@@ -279,32 +279,61 @@ class SummaryBuildContext:
             ]
         return trends
 
+    def aligned_prev_year_lookup(self, year):
+        curr_months = self.months_for_year(year)
+        prev_year = int(year) - 1
+        prev_months = [f"{prev_year}{m[4:]}" for m in curr_months]
+        
+        res = defaultdict(int)
+        for m in prev_months:
+            for (geo, metric), val in self.by_month.get(m, {}).items():
+                res[(geo, metric)] += val
+        return dict(res)
+
     def topic_yoy_lookup(self, selected_month, topics):
-        if not re.fullmatch(r"\d{6}", selected_month or ""):
-            return {}
-        previous_month = f"{int(selected_month[:4]) - 1}{selected_month[4:]}"
-        previous_lookup = self.by_month.get(previous_month, {})
         lookup = {}
-        for topic in topics:
-            if topic.get("is_total_scope"):
-                for (geography, metric), count in previous_lookup.items():
-                    if metric == TOTAL_METRIC:
-                        lookup[(topic["id"], geography)] = int(count or 0)
-                continue
-            metrics = set(topic.get("metrics") or ())
-            if not metrics:
-                continue
-            totals = defaultdict(int)
-            for (geography, metric), count in previous_lookup.items():
-                if metric in metrics:
-                    totals[geography] += int(count or 0)
-            for geography, count in totals.items():
-                lookup[(topic["id"], geography)] = count
+        if selected_month.endswith("_annual"):
+            year = selected_month.split("_")[0]
+            prev_lookup = self.aligned_prev_year_lookup(year)
+            for topic in topics:
+                if topic.get("is_total_scope"):
+                    for geo in self.geographies(year, is_annual=True):
+                        lookup[(topic["id"], geo)] = int(prev_lookup.get((geo, TOTAL_METRIC), 0))
+                else:
+                    metrics = tuple(topic.get("metrics") or ())
+                    for geo in self.geographies(year, is_annual=True):
+                        lookup[(topic["id"], geo)] = sum(int(prev_lookup.get((geo, m), 0)) for m in metrics)
+            return lookup
+
+        # Monthly mode
+        if re.fullmatch(r"\d{6}", selected_month or ""):
+            previous_month = f"{int(selected_month[:4]) - 1}{selected_month[4:]}"
+            prev_lookup = self.by_month.get(previous_month, {})
+            for topic in topics:
+                if topic.get("is_total_scope"):
+                    for (geography, metric), count in prev_lookup.items():
+                        if metric == TOTAL_METRIC:
+                            lookup[(topic["id"], geography)] = int(count or 0)
+                else:
+                    metrics = set(topic.get("metrics") or ())
+                    totals = defaultdict(int)
+                    for (geography, metric), count in prev_lookup.items():
+                        if metric in metrics:
+                            totals[geography] += int(count or 0)
+                    for geography, count in totals.items():
+                        lookup[(topic["id"], geography)] = count
+            return lookup
+
         return lookup
 
     def annual_comparison(self, months, selected_month, metric_colors):
-        selected_year = int(selected_month[:4])
-        selected_month_num = int(selected_month[4:])
+        if selected_month.endswith("_annual"):
+            selected_year = int(selected_month.split("_")[0])
+            curr_months = [int(m[4:]) for m in months if m.startswith(str(selected_year)) and re.fullmatch(r"\d{6}", m)]
+            selected_month_num = max(curr_months) if curr_months else 12
+        else:
+            selected_year = int(selected_month[:4])
+            selected_month_num = int(selected_month[4:])
         years = sorted({int(m[:4]) for m in months if re.fullmatch(r"\d{6}", m)})
         years = [y for y in years if y <= selected_year][-8:]
 
@@ -466,12 +495,12 @@ def calculate_summary_fast(context, metric_colors, month_or_year, available_mont
 
     if is_annual:
         year = int(month_or_year)
-        selected_month = f"{year}12"
+        selected_month = f"{year}_annual"
         query_param = f"{year}%"
         stats_lookup = context.stats_lookup(str(year), is_annual=True)
         geographies = context.geographies(str(year), is_annual=True)
-        prev_lookup = context.stats_lookup(str(year - 1), is_annual=True)
-        previous_total = context.total_for_year(year - 1)
+        prev_lookup = context.aligned_prev_year_lookup(year)
+        previous_total = int(prev_lookup.get((TOTAL_GEOGRAPHY, TOTAL_METRIC), 0))
         months_through_selected = [m for m in available_months if m <= f"{year}12"]
         monthly_counts = context.monthly_counts(context.months_for_year(year))
     else:
@@ -564,7 +593,7 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
 
     if is_annual:
         year = int(month_or_year)
-        selected_month = f"{year}12"
+        selected_month = f"{year}_annual"
         query_param = f"{year}%"
         
         # Fetch annual raw metrics
@@ -620,14 +649,20 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
             previous_total = prev_row[0] if prev_row else 0
     else:
         prev_year = year - 1
+        curr_year_months = [m for m in sorted(available_months) if m.startswith(str(year))]
+        prev_year_months = [f"{prev_year}{m[4:]}" for m in curr_year_months]
         months_through_selected = [m for m in sorted(available_months) if m <= f"{year}12"]
-        
-        sql_prev = "SELECT SUM(raw_value) FROM official_statistics WHERE source_month LIKE ? AND geography = ? AND metric = ?"
-        if db_type == "postgres":
-            sql_prev = sql_prev.replace("?", "%s")
-        cursor.execute(sql_prev, (f"{prev_year}%", TOTAL_GEOGRAPHY, TOTAL_METRIC))
-        prev_row = cursor.fetchone()
-        previous_total = prev_row[0] if prev_row and prev_row[0] is not None else 0
+
+        if prev_year_months:
+            markers = ",".join("?" for _ in prev_year_months)
+            sql_prev = f"SELECT SUM(raw_value) FROM official_statistics WHERE source_month IN ({markers}) AND geography = ? AND metric = ?"
+            if db_type == "postgres":
+                sql_prev = sql_prev.replace("?", "%s")
+            cursor.execute(sql_prev, tuple(prev_year_months) + (TOTAL_GEOGRAPHY, TOTAL_METRIC))
+            prev_row = cursor.fetchone()
+            previous_total = prev_row[0] if prev_row and prev_row[0] is not None else 0
+        else:
+            previous_total = 0
 
     # Monthly Counts list (required for charts)
     monthly_counts = []
@@ -686,12 +721,16 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
             prev_count = int(prev_row[0] or 0) if prev_row and prev_row[0] is not None else 0
         elif is_annual:
             markers = ",".join("?" for _ in source_labels)
-            sql_prev_cat = f"SELECT SUM(raw_value) FROM official_statistics WHERE source_month LIKE ? AND geography = ? AND metric IN ({markers})"
-            if db_type == "postgres":
-                sql_prev_cat = sql_prev_cat.replace("?", "%s")
-            cursor.execute(sql_prev_cat, (f"{prev_year}%", TOTAL_GEOGRAPHY) + tuple(source_labels))
-            prev_row = cursor.fetchone()
-            prev_count = int(prev_row[0] or 0) if prev_row and prev_row[0] is not None else 0
+            if prev_year_months:
+                month_markers = ",".join("?" for _ in prev_year_months)
+                sql_prev_cat = f"SELECT SUM(raw_value) FROM official_statistics WHERE source_month IN ({month_markers}) AND geography = ? AND metric IN ({markers})"
+                if db_type == "postgres":
+                    sql_prev_cat = sql_prev_cat.replace("?", "%s")
+                cursor.execute(sql_prev_cat, tuple(prev_year_months) + (TOTAL_GEOGRAPHY,) + tuple(source_labels))
+                prev_row = cursor.fetchone()
+                prev_count = int(prev_row[0] or 0) if prev_row and prev_row[0] is not None else 0
+            else:
+                prev_count = 0
 
 
         category_counts.append({
@@ -782,7 +821,7 @@ def calculate_summary(conn, db_type, month_or_year, available_months, is_annual=
     # Topics and Drilldowns
     topics = topic_definitions(stats_lookup)
     topic_monthly_trends = build_topic_monthly_trends(conn, db_type, months_through_selected, topics)
-    topic_yoy_lookup = build_topic_yoy_lookup(conn, db_type, selected_month, topics)
+    topic_yoy_lookup = build_topic_yoy_lookup(conn, db_type, selected_month, topics, months_through_selected)
     topic_drilldowns = build_topic_drilldowns(
         stats_lookup, geographies, total, metric_colors, topics,
         topic_monthly_trends, topic_yoy_lookup

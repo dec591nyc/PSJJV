@@ -8,6 +8,10 @@ import AnnualComparison from './components/AnnualComparison';
 import SourceContext from './components/SourceContext';
 import Feedback from './components/Feedback';
 import DrilldownDetail from './components/DrilldownDetail';
+import AiTopicTrendAnalysis from './components/AiTopicTrendAnalysis';
+import GeoSelector from './components/GeoSelector';
+import SurgeRadar from './components/SurgeRadar';
+import CityOverviewCard from './components/CityOverviewCard';
 
 const fmt = new Intl.NumberFormat('zh-TW');
 const allRegionsLabel = '全部縣市';
@@ -73,11 +77,49 @@ const formatPct = (value) => {
   return `${num > 0 ? '+' : ''}${num.toFixed(1)}%`;
 };
 
+// Global client-side in-memory cache to eliminate repeated network fetches
+const summaryClientCache = new Map();
+const prefetchedMonths = new Set();
+
+const fetchSummaryData = async (monthKey) => {
+  if (!monthKey) return null;
+  if (summaryClientCache.has(monthKey)) {
+    return summaryClientCache.get(monthKey);
+  }
+  try {
+    const res = await fetch(`/api/official-summary?month=${encodeURIComponent(monthKey)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data && !data.error) {
+      summaryClientCache.set(monthKey, data);
+      return data;
+    }
+  } catch (err) {
+    console.error(`Failed to fetch summary for ${monthKey}:`, err);
+  }
+  return null;
+};
+
+// Prefetch background helper
+const prefetchSummary = async (monthKey) => {
+  if (!monthKey || prefetchedMonths.has(monthKey) || summaryClientCache.has(monthKey)) return;
+  prefetchedMonths.add(monthKey);
+  try {
+    const data = await fetchSummaryData(monthKey);
+    if (data) {
+      summaryClientCache.set(monthKey, data);
+    }
+  } catch (e) {
+    // Ignore background prefetch errors
+  }
+};
+
 export default function DashboardPage() {
   const [activeView, setActiveView] = useState('topics'); // 'year', 'topics', 'local', 'method', 'feedback'
   const [dataMode, setDataMode] = useState('year'); // 'month', 'year'
   const [allMonths, setAllMonths] = useState([]);
-  const [selectedMonth, setSelectedMonth] = useState('');
+  const [selectedGeo, setSelectedGeo] = useState('全部縣市');
+  const [selectedMonth, setSelectedMonth] = useState('2026_annual');
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -96,30 +138,67 @@ export default function DashboardPage() {
     setTimeout(() => setShowToast(false), 3200);
   };
 
-  // 1. Fetch available months list
+  // 1. Parallel initial load: Fetch months list AND initial summary simultaneously
   useEffect(() => {
-    const fetchMonths = async () => {
+    let isMounted = true;
+
+    // Load initial summary immediately without waiting for months
+    const loadInitialSummary = async () => {
+      const initialKey = dataMode === 'year' ? '2026_annual' : '202605';
+      if (summaryClientCache.has(initialKey)) {
+        if (isMounted) {
+          setSummary(summaryClientCache.get(initialKey));
+          setLoading(false);
+        }
+      } else {
+        setLoading(true);
+        const data = await fetchSummaryData(initialKey);
+        if (isMounted && data) {
+          setSummary(data);
+          setLoading(false);
+        }
+      }
+    };
+
+    // Load available months in parallel
+    const loadMonths = async () => {
       try {
         const res = await fetch('/api/months');
         const data = await res.json();
         const rawItems = data.items?.length ? data.items : [];
         const items = rawItems.filter(item => /^\d{6}$/.test(item.source_month));
-        setAllMonths(items);
+        if (isMounted) {
+          if (items.length > 0) {
+            setAllMonths(items);
+            // If the latest month is different, optionally sync default
+            const latestMonth = items[0].source_month;
+            const target = dataMode === 'year' ? `${latestMonth.slice(0, 4)}_annual` : latestMonth;
+            setSelectedMonth(prev => prev || target);
 
-        if (items.length > 0) {
-          const defaultMonth = items[0].source_month;
-          setSelectedMonth(dataMode === 'year' ? `${defaultMonth.slice(0, 4)}_annual` : defaultMonth);
-        } else {
-          setAllMonths([{ source_month: '202605', count: 0 }]);
-          setSelectedMonth(dataMode === 'year' ? '2026_annual' : '202605');
+            // Prefetch the opposite mode in background (e.g. latest monthly if in annual mode)
+            setTimeout(() => {
+              prefetchSummary(latestMonth);
+              if (items[1]) prefetchSummary(items[1].source_month);
+              prefetchSummary(`${latestMonth.slice(0, 4)}_annual`);
+            }, 500);
+          } else {
+            setAllMonths([{ source_month: '202605', count: 0 }]);
+          }
         }
       } catch (err) {
         console.error("Failed to load months:", err);
-        setAllMonths([{ source_month: '202605', count: 0 }]);
-        setSelectedMonth(dataMode === 'year' ? '2026_annual' : '202605');
+        if (isMounted) {
+          setAllMonths([{ source_month: '202605', count: 0 }]);
+        }
       }
     };
-    fetchMonths();
+
+    loadInitialSummary();
+    loadMonths();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // 2. Adjust selectedMonth when dataMode changes
@@ -153,22 +232,34 @@ export default function DashboardPage() {
     }
   };
 
-  // 3. Fetch summary for selectedMonth
+  // 3. Fetch summary for selectedMonth with Client Cache (Instant UI update if cached)
   useEffect(() => {
     if (!selectedMonth) return;
+
+    let isMounted = true;
     const fetchSummary = async () => {
+      // Check cache first for 0ms transition
+      if (summaryClientCache.has(selectedMonth)) {
+        setSummary(summaryClientCache.get(selectedMonth));
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
-      try {
-        const res = await fetch(`/api/official-summary?month=${encodeURIComponent(selectedMonth)}`);
-        const data = await res.json();
-        setSummary(data);
-      } catch (err) {
-        console.error("Failed to load summary:", err);
-      } finally {
+      const data = await fetchSummaryData(selectedMonth);
+      if (isMounted) {
+        if (data) {
+          setSummary(data);
+        }
         setLoading(false);
       }
     };
+
     fetchSummary();
+
+    return () => {
+      isMounted = false;
+    };
   }, [selectedMonth]);
 
   // Derived variables
@@ -534,8 +625,13 @@ export default function DashboardPage() {
                       {/* Render Recharts line chart */}
                       <LineChart data={activeTopicRecord.trend} compact={true} />
 
-                      {/* AI interpretation of the topic trend */}
-                      {renderTopicAiAnalysis(activeTopicRecord)}
+                      {/* Unified AI Topic Trend Analysis (Infused with Gemini Flash & Ollama LLM) */}
+                      <AiTopicTrendAnalysis
+                        topic={activeTopicRecord}
+                        selectedMonth={selectedMonth}
+                        totalCases={summary?.total_cases || 0}
+                        yoyPct={summary?.total_change_pct || 0}
+                      />
                     </>
                   ) : (
                     <div className="chart-empty compact">

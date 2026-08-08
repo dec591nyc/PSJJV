@@ -5,9 +5,26 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
+// In-memory cache for months list
+let monthsCache = null;
+let monthsCacheTimestamp = 0;
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 export async function GET() {
   if (!client) {
     return NextResponse.json({ items: [] });
+  }
+
+  // Check in-memory cache
+  if (monthsCache && Date.now() - monthsCacheTimestamp < CACHE_TTL_MS) {
+    return NextResponse.json(
+      { items: monthsCache },
+      {
+        headers: {
+          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+        },
+      }
+    );
   }
 
   try {
@@ -18,11 +35,15 @@ export async function GET() {
       source_month: String(row.source_month || row[0]),
       count: Number(row.count ?? row[1] ?? 0),
     }));
+
+    monthsCache = items;
+    monthsCacheTimestamp = Date.now();
+
     return NextResponse.json(
       { items },
       {
         headers: {
-          'Cache-Control': 'no-store, max-age=0',
+          'Cache-Control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
         },
       }
     );
