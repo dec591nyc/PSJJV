@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="MIT License" />
 </p>
 
-💡 **本治安統計分析平台係結合多項新穎技術所開發完成，如 Next.js 數據儀表板、 Python 數據整理及 n8n 自動化數據 ETL 流水線。
+💡 本治安統計分析平台係結合多項新穎技術所開發完成，如 Next.js 數據儀表板、 Python 數據整理及 n8n 自動化數據 ETL 流水線。
 
 並於每月週期性抓取內政部刑事案件開放數據集（代號 9603），經後端資訊校對、數據統計，最後以視覺化的呈現提供民眾一個可直觀理解全國縣市各類犯罪趨勢、分布及 YoY 增減變化的儀表板。**
 
