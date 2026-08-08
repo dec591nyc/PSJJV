@@ -1,19 +1,25 @@
-import { Pool } from 'pg';
+import { createClient } from '@libsql/client';
 
-const connectionString = process.env.PUBLIC_SAFETY_DATABASE_URL;
+const tursoUrl = process.env.TURSO_DATABASE_URL;
+const tursoAuthToken = process.env.TURSO_AUTH_TOKEN;
 
-let pool = null;
+let client = null;
 
-if (connectionString) {
-  pool = new Pool({
-    connectionString,
-    max: 3,
-    connectionTimeoutMillis: 5000,
-    idleTimeoutMillis: 10000,
-    ssl: {
-      rejectUnauthorized: false
-    }
-  });
+if (
+  tursoUrl &&
+  (tursoUrl.startsWith('libsql:') ||
+    tursoUrl.startsWith('https:') ||
+    tursoUrl.startsWith('http:') ||
+    tursoUrl.startsWith('file:'))
+) {
+  try {
+    client = createClient({
+      url: tursoUrl,
+      authToken: tursoAuthToken,
+    });
+  } catch (e) {
+    console.warn('Failed to initialize Turso client:', e.message);
+  }
 }
 
-export default pool;
+export default client;

@@ -1,0 +1,27 @@
+name: Monthly Public Safety Statistics Update
+
+on:
+  schedule:
+    # 台灣時間每月 25 日凌晨 03:00 (UTC 19:00, 24th)
+    - cron: '0 19 24 * *'
+  workflow_dispatch: # 支援在 GitHub 網頁上手動一鍵點擊執行
+
+jobs:
+  update-statistics:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Execute Daily Ingestion & Turso Sync
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          python scripts/run_daily_update.py --skip-existing --min-release-day 8
+          python scripts/sync_summary_reports.py --latest-only

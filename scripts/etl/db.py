@@ -28,10 +28,115 @@ def load_env_file():
 
 load_env_file()
 
+class TursoCursor:
+    def __init__(self, conn):
+        self.conn = conn
+        self._rows = []
+        self._row_idx = 0
+        self.description = []
+
+    def execute(self, sql: str, params: tuple | list = ()):
+        self._rows, self.description = self.conn.execute_http(sql, params)
+        self._row_idx = 0
+        return self
+
+    def executemany(self, sql: str, params_list: list):
+        self.conn.executemany_http(sql, params_list)
+        self._rows = []
+        self._row_idx = 0
+        return self
+
+    def fetchone(self):
+        if self._row_idx < len(self._rows):
+            row = self._rows[self._row_idx]
+            self._row_idx += 1
+            return row
+        return None
+
+    def fetchall(self):
+        rows = self._rows[self._row_idx:]
+        self._row_idx = len(self._rows)
+        return rows
+
+class TursoConnection:
+    def __init__(self, url: str, auth_token: str = None):
+        clean_url = url.replace("libsql://", "https://")
+        if not clean_url.startswith("http"):
+            clean_url = f"https://{clean_url}"
+        if not clean_url.endswith("/v2/pipeline"):
+            clean_url = clean_url.rstrip("/") + "/v2/pipeline"
+        self.pipeline_url = clean_url
+        self.auth_token = auth_token or os.environ.get("TURSO_AUTH_TOKEN", "")
+
+    def cursor(self):
+        return TursoCursor(self)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+    def _post(self, requests_payload):
+        import json
+        import urllib.request
+        headers = {
+            "Content-Type": "application/json"
+        }
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+        req = urllib.request.Request(
+            self.pipeline_url,
+            data=json.dumps({"requests": requests_payload}).encode("utf-8"),
+            headers=headers
+        )
+        with urllib.request.urlopen(req) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def execute_http(self, sql: str, params: tuple | list = ()):
+        args = [
+            {"type": "text" if isinstance(p, str) else "integer" if isinstance(p, int) else "float" if isinstance(p, float) else "null",
+             "value": str(p) if p is not None else None}
+            for p in params
+        ]
+        payload = [{"type": "execute", "stmt": {"sql": sql, "args": args}}]
+        res = self._post(payload)
+        response_obj = res.get("results", [{}])[0].get("response", {}).get("result", {})
+        cols = [c["name"] for c in response_obj.get("cols", [])]
+        rows = []
+        for r in response_obj.get("rows", []):
+            row_dict = {}
+            for col_idx, col_name in enumerate(cols):
+                val_obj = r[col_idx]
+                row_dict[col_name] = val_obj.get("value")
+            rows.append(row_dict)
+        desc = [(c, None, None, None, None, None, None) for c in cols]
+        return rows, desc
+
+    def executemany_http(self, sql: str, params_list: list):
+        for i in range(0, len(params_list), 100):
+            chunk = params_list[i:i+100]
+            requests = []
+            for params in chunk:
+                args = [
+                    {"type": "text" if isinstance(p, str) else "integer" if isinstance(p, int) else "float" if isinstance(p, float) else "null",
+                     "value": str(p) if p is not None else None}
+                    for p in params
+                ]
+                requests.append({"type": "execute", "stmt": {"sql": sql, "args": args}})
+            self._post(requests)
+
 def get_connection(db_path: Path | str = None, db_type: str = None) -> tuple[Any, str]:
-    """Retrieve connection to SQLite or Postgres based on parameters or environment variables."""
+    """Retrieve connection to SQLite, Turso LibSQL, or Postgres."""
+    turso_url = os.environ.get("TURSO_DATABASE_URL")
     pg_url = os.environ.get("PUBLIC_SAFETY_DATABASE_URL")
-    if db_type == "postgres" or (db_type is None and pg_url):
+
+    if db_type == "turso" or (db_type is None and turso_url):
+        return TursoConnection(turso_url, os.environ.get("TURSO_AUTH_TOKEN")), "sqlite"
+    elif db_type == "postgres" or (db_type is None and pg_url):
         import psycopg2
         conn = psycopg2.connect(pg_url)
         return conn, "postgres"
@@ -44,6 +149,7 @@ def get_connection(db_path: Path | str = None, db_type: str = None) -> tuple[Any
         conn = sqlite3.connect(db_path)
         conn.row_factory = sqlite3.Row
         return conn, "sqlite"
+
 
 def db_execute(conn: Any, db_type: str, sql: str, params: tuple | list = ()) -> Any:
     """Execute SQL statement with cross-db compatibility (handles placeholder mapping)."""
