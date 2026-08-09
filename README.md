@@ -1,154 +1,200 @@
-# 台灣地方治安統計數據分析平台 
-
-(Taiwan Local Public Safety Statistics & Data Integrity Audit Platform)
+# 台灣地方治安統計分析與數據完整性平台
+(Taiwan Public Safety & Crime Statistics Integrity Analytics)
 
 <p align="center">
   <img src="https://img.shields.io/badge/Next.js-14.2-black?style=for-the-badge&logo=next.js" alt="Next.js" />
   <img src="https://img.shields.io/badge/React-18-blue?style=for-the-badge&logo=react" alt="React" />
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/Turso-Cloud_SQLite-00EB8F?style=for-the-badge&logo=sqlite&logoColor=black" alt="Turso SQLite" />
+  <img src="https://img.shields.io/badge/Google_Gemini-3.6_Flash-4285F4?style=for-the-badge&logo=google" alt="Gemini 3.6 Flash" />
   <img src="https://img.shields.io/badge/GitHub_Actions-Automated_ETL-2088FF?style=for-the-badge&logo=githubactions&logoColor=white" alt="GitHub Actions" />
-  <img src="https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge" alt="MIT License" />
 </p>
 
-💡 **本治安統計分析平台結合 Next.js 數據儀表板、Python 數據校對 ETL 及 Turso 雲端原生 SQLite 架構。**
-
-每月由 GitHub Actions 雲端自動抓取內政部警政署刑事案件開放資料集（代號 9603），經嚴謹的數據清洗、校對加總與治安指標計算後，直接寫入雲端分散式 SQLite（Turso）。前端 Next.js 透過 Edge API 高速查詢，提供民眾直觀理解全國各縣市犯罪趨勢、案件分布與 YoY 增減變化。
-
-🔗 [**Live Demo 儀表板線上預覽**](https://public-safety-integrity-analytics.vercel.app/)
+基於內政部警政署刑事統計月報（開放資料集代號 9603）構建之地方治安數據分析與情報研判平台。結合自動化 Python ETL 校驗管道、Turso 雲端分散式 SQLite、Next.js 高對比動態儀表板與 Google Gemini 3.6 Flash 治安領域知識庫引擎，提供全國 22 縣市刑事案件長期走勢、YoY 同期累計比對與多視角情報研判。
 
 ---
 
-## 🎯 專案核心特色
+## 🎯 開發動機與解決問題 (Motivation & Problems)
 
-1. **官方統計資料作為權威基礎**：
-   本平台使用內政部統計月報中的刑事案件開放資料集。相較於非結構化新聞或網路聲量，官方受（處）理刑事統計具有長期一致性與可回溯性，更適合作為趨勢比較與治安研判的基礎。
-2. **內建數據完整性校對機制（Audit & Checksums）**：
-   政府開放資料在實務上偶有欄位格式變動、月份資料未齊或縣市加總與全國總計不一致等問題。本專案在 ETL 流程中加入自動加總檢查，確保「各縣市加總」等於「全國總計」；一旦出現差額會自動發出警報，防止未經確認的錯誤數據直接渲染至前端。
-3. **時間窗口嚴格對齊原則（Period-to-Date Baseline Alignment）**：
-   年度累計（Annual PTD）計算與去年同期（YoY）對比時，嚴格對齊相同累積月數（如本期前 6 個月對齊去年前 6 個月），杜絕拿 6 個月累計除以 12 個月全年度（導致負五十幾趴）或除以單月（導致暴漲四百多趴）的時間錯置錯誤。
-4. **Turso 雲端分散式 SQLite（0 JSON 垃圾檔案、0 維護負擔）**：
-   捨棄易因閒置被刪除的外部資料庫或龐雜的本機靜態 JSON 檔案，全面採用 **Turso（基於 LibSQL 的分散式 SQLite）**。前後端直接透過 SQL 查詢資料，享受原生 SQLite 輕量優勢與 9GB 免費大額度。
-5. **GitHub Actions 雲端全自動排程（地端關機無痛運行）**：
-   每月 25 日凌晨 03:00 自動在 GitHub 雲端啟動 Ubuntu 虛擬機執行 Python ETL 下載最新月報、更新 Turso 資料庫。**開發者個人電腦 24 小時關機亦能穩定自動更新**。
-6. **極速載入與三層快取架構（Zero-Waterfall & Multi-tier Cache）**：
-   - **並行發送**：首頁載入時同步平行抓取月份清單與彙整報表，消除請求串聯瀑布流。
-   - **前端記憶體快取**：瀏覽過的月份立即存入 Client-Side Map 快取，月/年維度切換達到 0ms 秒開。
-   - **Node.js 記憶體快取 + HTTP Cache-Control**：API 端具備伺服器記憶體快取與邊緣快取標頭，重複造訪即刻秒回。
-7. **LLM 作為後端語義數據 API（Semantic Data & Intelligence API）**：
-   - 本平台將 LLM 定義為「**後端語義數據 API**」而非單純的對話機器人。輸入官方結構化數據，輸出包含風險等級、歸因文本與行動建議的結構化 JSON Payload。
-   - **優先層**：Google Gemini Flash API（0.5 秒高速推論）。
-   - **備援層**：Ollama 本地離線模型（`llama3.2`, `qwen2.5`, `taiwan-llm`，零 API 費用、數據隱私保障）。
-   - **保底層**：內建規則統計引擎（100% 穩定零白屏）。
-   - 支援「🔍 警政情報視角」、「🛡️ 民生防範觀點」與「📊 統計歸因分析」三大角色即時運算。
+### 1. 解決什麼核心痛點？
+- **官方數據零散且難以直觀對比**：政府統計月報通常以龐大 CSV 形式釋出，缺乏跨月份、跨年度之動態視覺化與各縣市案件佔比之直觀探索工具。
+- **數據計算分母錯置與加總矛盾**：部分第三方圖表在計算年度累計與同期增減率（YoY）時，常發生「以半年度累計除以全年度（導致負五十幾趴）」或「各縣市加總不等於全國總計」之邏輯矛盾。
+- **AI 解讀流於空話**：傳統 LLM 在缺乏法規與專案背景下，生成內容往往流於「加強巡邏、注意安全」等無效建議，無法提供具體打擊策略與民生防護 SOP。
+
+### 2. 本專案的架構優勢
+- **時間窗口嚴格對齊 (Period-to-Date Alignment)**：在月對月（MoM）與累計對同期累計（YoY PTD）計算中嚴格校對相同累積月數，杜絕數據失真。
+- **單一根目錄 `.env` 架構**：統一前後端環境變數來源，消除變數重複定義與配置不同步問題。
+- **領域知識庫注入 (Domain Knowledge Injection)**：內建 `crimeDomainKnowledge.js`，將《詐欺防制條例》、打詐 1.5 版、《跟騷法》、第三級毒品依托咪酯（喪屍煙油）專案等法制脈絡注入大模型，產出具備實務深度的情報分析。
+- **真實連線心跳計數 (Client Heartbeat)**：採用服務端記憶體心跳追蹤（10 秒 Heartbeat、25 秒超時修剪），如實呈現即時在線連線數，絕不虛構灌水。
 
 ---
 
-## 🏗️ 系統架構與資料流
+## 🏗️ 系統架構與資料流 (Technical Architecture)
 
 ```mermaid
 flowchart TD
-    subgraph "數據源 (Data Source)"
-        A[內政部統計網\n刑事統計數據集 9603]
+    subgraph "1. 數據擷取與自動化 ETL"
+        A["內政部警政署開放資料集 (9603)"] -->|每月自動抓取 CSV| B["run_daily_update.py (下載/清洗/防呆)"]
+        B -->|校對加總與基期寫入| DB[(Turso 雲端 SQLite / 本地 SQLite)]
+        DB -->|計算 YoY 與主題聚集| C["sync_summary_reports.py (編譯報表)"]
+        C -->|寫入彙整快取表| DB
     end
 
-    subgraph "雲端自動化流水線 (GitHub Actions Cron 每月25日)"
-        B["run_daily_update.py\n(下載、清洗、寫入 DB)"]
-        C["sync_summary_reports.py\n(計算指標、趨勢與 YoY 變化)"]
-        
-        A -->|官方 CSV 數據| B
-        B -->|寫入官方原始統計數據| DB[(Turso 雲端 SQLite\n/ 本地 SQLite)]
-        DB -->|拉取並彙整計算| C
-        C -->|寫入彙整報表與 Payload 快取| DB
+    subgraph "2. 後端資料與 AI 語意服務 (Next.js Node.js Runtime)"
+        DB -->|SQL 高速查詢| API["/api/official-summary & /api/months"]
+        ENV[".env 單一主配置"] --> API
+        ENV --> AI_ROUTE["/api/ai/analyze (智慧情報端點)"]
+        KNOWLEDGE["crimeDomainKnowledge.js\n(7大治安法制與專案知識庫)"] --> AI_ROUTE
+        AI_ROUTE -->|結構化 Prompt + 0.75 採樣| GEMINI["Google Gemini 3.6 Flash / Flash Latest"]
+        CLIENT_PINGS["/api/active-users"] -->|In-Memory Map 25s 輪詢| HB_TRACKER["真實在線心跳追蹤器"]
     end
 
-    subgraph "前端極速載入架構 (Next.js / Vercel)"
-        DB -->|SQL 主鍵高速查詢| V["Next.js API 路由\n(In-Memory Cache & S-MaxAge)"]
-        V -->|平行傳輸| UI["React 前端 (Client Cache Map)\n(消除瀑布流 / 0ms 秒切)"]
+    subgraph "3. 前端動態視覺化儀表板 (React / Vanilla CSS)"
+        API --> UI["深邃海軍藍高對比介面\n(折線圖 / 數據晶片 / 多視角情報卡)"]
+        GEMINI --> UI
+        HB_TRACKER --> UI
     end
 ```
 
----
-
-## 📂 目錄結構與模組說明
+### 📂 目錄結構
 
 ```text
 ├── .github/
 │   └── workflows/
-│       └── monthly_update.yml   # [自動化] 每月 25 日 GitHub Actions 自動抓取與編譯排程
-├── web/                         # Next.js 數據儀表板 (本專案前端)
-│   ├── src/app/                 # App Router (首頁、API 路由、折線與堆疊圖表)
-│   ├── src/utils/db.js          # Turso LibSQL 資料庫連線模組
-│   └── package.json             # Next.js 專案依賴設定
-├── scripts/                     # Python 數據流水線與編譯工具
-│   ├── etl/                     # 結構化 ETL 套件 (核心處理邏輯)
-│   │   ├── config.py            # 配置常數、犯罪案件對齊、顏色樣式
-│   │   ├── db.py                # 跨資料庫連線 (Turso / SQLite / Postgres)
-│   │   ├── extract.py           # 抓取並解析 MOI 刑事 CSV 檔
-│   │   ├── transform.py         # 聚合月/年指標、YoY 計算、AI 趨勢研判
-│   │   └── load.py              # 將彙整結果同步寫入 DB (crime_summary_reports)
-│   ├── run_daily_update.py      # [主更新] 下載官方 CSV，對齊並寫入官方原始數據
-│   ├── sync_summary_reports.py  # [主編譯] 計算統計指標、YoY 與主題分類
-│   └── requirements.txt         # Python 依賴清單
-├── data/
-│   └── local/                   # 本地開發 SQLite 資料庫 (public_safety.sqlite)
-├── sql/                         # 資料庫結構描述檔 (schema_sqlite.sql / schema_postgres.sql)
-└── README.md                    # 本專案說明文件
+│       └── monthly_update.yml   # 每月 25 日 GitHub Actions 雲端自動下載與編譯排程
+├── web/                         # Next.js 數據儀表板 (App Router)
+│   ├── src/app/
+│   │   ├── api/                 # 後端 API 路由 (AI 分析、在線人數、官方摘要、月份清單)
+│   │   ├── components/          # 視覺組件 (AI 主題情報、趨勢折線圖、在線狀態徽章)
+│   │   ├── globals.css          # 高對比色彩系統與玻璃光澤樣式
+│   │   └── layout.js            # 根版面與繁體中文字體載入
+│   └── src/utils/
+│       ├── db.js                # Turso LibSQL 連線與根目錄 .env 解析器
+│       └── crimeDomainKnowledge.js # 7 大治安主題法制與專案領域知識庫
+├── scripts/                     # Python 數據流水線與檢驗工具
+│   ├── etl/                     # 模組化 ETL (extract, transform, load, db, config)
+│   ├── run_daily_update.py      # 主資料下載與清洗腳本
+│   ├── sync_summary_reports.py  # 彙整指標與 YoY 計算腳本
+│   └── test_gemini_key.py       # Google Gemini API 活體連線檢測工具
+├── sql/                         # 資料庫結構定義 (schema_sqlite.sql)
+├── .env.example                 # 統一環境變數範本檔
+└── README.md                    # 本說明文件
 ```
 
 ---
 
-## 🔐 環境變數分類原則與整合架構 (Environment Configuration)
+## ⚡ 核心功能 (Core Features)
 
-為了確保全端專案（Python ETL 數據流水線 ＋ Next.js 前端 API）的一致性與可維護性，本專案採用**「四象限職責分離規範」**。
-
-### 📁 目錄位置與生效原則
-- **根目錄 `.env`（全局主檔）**：供 Python 資料管線、資料庫排程與 GitHub Actions 讀取。
-- **`web/.env`（前端設定）**：供 Next.js API Routes、Edge Runtime 與 SSR 前端讀取。
-- 專案已同步提供範本檔 [`.env.example`](file:///c:/Users/zifue/Documents/AgenticAI/Public-Safety-Integrity-Analytics/.env.example) 與 [`web/.env.example`](file:///c:/Users/zifue/Documents/AgenticAI/Public-Safety-Integrity-Analytics/web/.env.example)。
-
-### 🧩 四象限變數分類清單
-
-| 分類象限 | 變數名稱 | 預設值 / 格式 | 說明與作用 |
-| :--- | :--- | :--- | :--- |
-| **🗄️ 1. 資料庫與儲存** | `TURSO_DATABASE_URL` | `libsql://[db].turso.io` | **必填**。Turso 雲端分散式 SQLite 端點。 |
-| | `TURSO_AUTH_TOKEN` | `eyJhbGci...` | **必填**。Turso JWT 存取金鑰。 |
-| | `PUBLIC_SAFETY_DATABASE_URL` | `postgresql://...` | （選用）若擴充至 PostgreSQL / Supabase 時填寫。 |
-| **🧠 2. AI 智慧情報引擎** | `GEMINI_API_KEY` | `AIzaSy...` | **優先**。Google Gemini Flash API Key，0.5秒極速情報推論。 |
-| | `GEMINI_MODEL` | `gemini-2.0-flash` | Gemini Flash 模型版本。 |
-| | `OLLAMA_BASE_URL` | `http://localhost:11434` | **備援**。本地 Ollama 離線模型服務端點。 |
-| | `OLLAMA_MODEL` | `llama3.2` | 本地運行之 LLM 模型名稱（如 `qwen2.5`, `taiwan-llm`）。 |
-| **🌐 3. 前端與快取** | `NEXT_PUBLIC_APP_TITLE` | `台灣地方治安統計...` | 網頁主標題。 |
-| | `CACHE_MAX_AGE` | `300` | HTTP API 伺服器快取秒數（5分鐘）。 |
-| | `CACHE_STALE_WHILE_REVALIDATE`| `86400` | S-MaxAge 後台重驗證秒數（24小時）。 |
-| **⚙️ 4. 數據流水線** | `MOI_DATASET_ID` | `9603` | 內政部警政署刑事月報資料集編號。 |
+1. **官方統計數據動態儀表板**：
+   - 支援 2026/06 等最新月份與年度累計切換，呈現全國總件數、破獲數與破獲率。
+   - 繪製近 12 個月案件波動趨勢折線圖，動態標註歷史高峰月、歷史低點月與均線。
+2. **7 大主題治安情報多視角研判**：
+   - 涵蓋「財產與詐欺犯罪」、「毒品與公共危險」、「暴力與重大刑案」、「婦幼安全與家庭保護」、「兒少與校園安全」等主題。
+   - 支援 **🔍 警政執法情勢**（專案查緝、熱區巡查）、**🛡️ 民生防範觀點**（防騙SOP、110/165求助指引）與 **📊 統計異動歸因**（人口聚集拉動、基期效應）三大視角動態推論。
+3. **Google Gemini 3.6 Flash 原生整合**：
+   - 支援 Google Gemini 3.6 Flash 與 Gemini Flash 最新版，平均推論延遲約 0.4 秒。
+   - 具備動態採樣與領域知識注入，每次點擊皆生成具體實用的專業方針，並標註產出時間戳記。
+4. **全自動數據校驗與排程更新**：
+   - GitHub Actions 每月 25 日自動執行 Python 腳本下載最新資料並寫入 Turso 雲端資料庫。
+   - 內建各縣市加總自動校驗檢查，杜絕異常數據外溢。
 
 ---
 
-## 🚀 部署與本地開發
+## ⚙️ 環境變數與設定說明 (Configuration)
 
-### 1. 建立免費 Turso 資料庫（1 分鐘快速完成）
-1. 至 [Turso 官網 (turso.tech)](https://turso.tech/) 註冊並建立一個免費資料庫（例如名為 `public-safety`）。
-2. 在 Turso Dashboard 取得資料庫網址（URL）與 Token：
-   ```env
-   TURSO_DATABASE_URL="libsql://public-safety-[org].turso.io"
-   TURSO_AUTH_TOKEN="your_turso_auth_token"
-   ```
-3. 在 SQL Editor 執行 `sql/schema_sqlite.sql` 建立資料表結構。
+本專案採用**單一根目錄 `.env` 架構**，所有後端 Node.js API 與 Python ETL 腳本統一讀取專案根目錄之 `.env` 檔案。
 
-### 2. 本地執行資料庫更新與編譯
+### 📁 `.env.example` 變數清單
+
+```env
+# ----------------------------------------------------
+# 🗄️ 1. 資料庫連線配置 (Database Credentials)
+# ----------------------------------------------------
+TURSO_DATABASE_URL="libsql://your-database.turso.io"
+TURSO_AUTH_TOKEN="your_turso_jwt_auth_token"
+
+# ----------------------------------------------------
+# 🧠 2. AI 智慧情報服務 (Semantic Data & LLM API)
+# ----------------------------------------------------
+GEMINI_API_KEY="AIzaSy..." # 或 AQ.xxxxxxxxx (Google AI Studio 取得)
+GEMINI_MODEL="gemini-3.6-flash"
+OLLAMA_BASE_URL="http://localhost:11434"
+OLLAMA_MODEL="llama3.2"
+
+# ----------------------------------------------------
+# 🌐 3. 前端應用與伺服器快取 (Frontend & Cache)
+# ----------------------------------------------------
+NEXT_PUBLIC_APP_TITLE="地方治安案件趨勢與構成視覺化平台"
+CACHE_MAX_AGE="300"
+CACHE_STALE_WHILE_REVALIDATE="86400"
+
+# ----------------------------------------------------
+# ⚙️ 4. 數據流水線設定 (Data Pipeline)
+# ----------------------------------------------------
+MOI_DATASET_ID="9603"
+```
+
+### 🔒 安全性與防護機制
+- **金鑰隔離**：所有 API 金鑰均僅保留於後端 Node.js 與 Python 執行環境，前端介面不暴露任何金鑰字串與內部管理按鈕。
+- **速率防護**：若短期內連續點擊觸發 Google API 429 限制，後端具備專業領域備援推論，確保系統永不白屏中斷。
+
+---
+
+## 🚀 本機啟動與快速上手 (Getting Started)
+
+### 1. 前置需求
+- **Node.js**: `v18.17.0+` 或 `v20.x`
+- **Python**: `3.10+`（若需執行本地 ETL 數據下載與測試腳本）
+
+### 2. 環境安裝與設定
 ```bash
-# 1. 下載最新月份官方資料並寫入 Turso
-python scripts/run_daily_update.py --skip-existing --min-release-day 8
+# 1. 複製專案並安裝前端依賴
+git clone https://github.com/your-org/Public-Safety-Integrity-Analytics.git
+cd Public-Safety-Integrity-Analytics/web
+npm install
 
-# 2. 自動計算最新治安指標與年度比較
-python scripts/sync_summary_reports.py --latest-only
+# 2. 回到專案根目錄建立設定檔
+cd ..
+cp .env.example .env
+# 在 .env 中填入您的 TURSO 與 GEMINI 金鑰
 ```
 
-### 3. 本地啟動前端開發服務
+### 3. 測試 Google Gemini API 連線
+在專案根目錄執行活體檢測工具，確認金鑰是否能正常調用：
+```bash
+python scripts/test_gemini_key.py
+```
+若金鑰正確，終端機將顯示 `🟢 【驗證成功！Google 伺服器回應 HTTP 200 OK】`。
+
+### 4. 啟動開發伺服器
+```bash
+npm --prefix web run dev
+```
+啟動後開啟瀏覽器訪問 **[http://localhost:3000](http://localhost:3000)** 即可預覽完整儀表板。
+
+---
+
+## 📦 建置與部署 (Deployment & Engineering Takeaways)
+
+### 1. 生產環境打包 (Production Build)
 ```bash
 cd web
-npm install
-npm run dev
+npm run build
+npm run start
 ```
-啟動後訪問 `http://localhost:3000` 即可預覽完整儀表板。
+
+### 2. 雲端部署 (Vercel / Node.js Host)
+1. 將專案推送至 GitHub。
+2. 在 [Vercel](https://vercel.com/) 匯入專案，Root Directory 選擇 `web`。
+3. 在 Vercel Project Settings ➔ Environment Variables 中填入 `.env` 中的對應變數。
+4. 部署完成即可享受全球 Edge 高速響應。
+
+### 💡 軟體工程實踐與心得 (Engineering Takeaways)
+1. **去中心化無伺服器 SQLite**：透過 Turso（LibSQL）將關聯式資料庫輕量化，消除傳統關聯式資料庫的高額維運開銷，並獲得毫秒級的查詢效能。
+2. **大模型領域知識注入實踐**：單純仰賴 LLM 的通用知識往往無法滿足垂直領域的專業需求；透過專案化的法規與戰術模板預先注入，能使大模型產出精準、專業且具備實戰價值的決策情報。
+3. **零偽造的數據誠信原則**：在統計數據與在線連線設計中，堅持 100% 依據真實訊號運作，杜絕隨機灌水與假資料，維護分析系統的權威性與公信力。
+
+---
+
+## 📄 授權條款 (License)
+本專案基於 [MIT License](LICENSE) 規範開源釋出。統計數據來源為中華民國內政部警政署政府資料開放平臺（Open Data）。
