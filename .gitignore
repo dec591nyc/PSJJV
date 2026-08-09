@@ -245,3 +245,11 @@ web/build/
 web/.env*.local
 web/.vercel
 next-env.d.ts
+# Personal Agent Customizations & Skills (Do NOT commit)
+.agents/
+.claude/
+.codex/
+.omc/
+skills/
+AGENTS.md
+
